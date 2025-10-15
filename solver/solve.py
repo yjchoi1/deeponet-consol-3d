@@ -7,26 +7,29 @@ import gstools as gs
 
 def random_gaussian_pwp(
     n_samples: int,
-    m: int,
-    z_range: Tuple[float, float],
+    nx: int,
+    ny: int,
+    x_range: Tuple[float, float],
+    y_range: Tuple[float, float],
     gp_params: dict,
     u0_ranges: Sequence[Tuple[float, float]],
     seed: int = 42,
 ) -> List[np.ndarray]:
     """
-    Generate random Gaussian input functions u(z) for an initial vertical
-    pore-water-pressure profile u_0(z) using GSTools for Gaussian process generation.
+    Generate random Gaussian input surfaces u(x, y) for an initial pore-water-pressure
+    field that is constant with depth and varies only in the horizontal plane.
     """
+
+    gp_params = gp_params or {}
 
     np.random.seed(seed)
     _random.seed(seed)
 
-    # Generate input sensor locations
-    z = np.linspace(z_range[0], z_range[1], m)
-    
-    # Create Gaussian model using GSTools
+    x = np.linspace(x_range[0], x_range[1], nx)
+    y = np.linspace(y_range[0], y_range[1], ny)
+
     model = gs.Gaussian(
-        dim=1,
+        dim=2,
         var=gp_params.get("output_scale", 1.0) ** 2,
         len_scale=gp_params.get("length_scales", 1.0)
     )
@@ -36,11 +39,11 @@ def random_gaussian_pwp(
         # Randomly select base value (u0) from the provided ranges
         lo, hi = _random.choice(list(u0_ranges))
         u0_mean = np.random.uniform(lo, hi)
-        
+
         # Generate spatial random field with mean u0_mean
         srf = gs.SRF(model, mean=u0_mean)
-        u = srf(z)
-        outputs.append(u)
+        field = np.asarray(srf.structured([x, y]), dtype=float)
+        outputs.append(field)
     return outputs
 
 
@@ -54,22 +57,25 @@ def _apply_drained_dirichlet_bc(U: np.ndarray) -> None:
     U[:, :, -1] = 0.0
 
 
-def build_initial_field_from_profile(
-    u0_z: np.ndarray, nx: int, ny: int, nz: int
+def build_initial_field_from_surface(
+    u0_xy: np.ndarray, nx: int, ny: int, nz: int
 ) -> np.ndarray:
     """
-    Broadcast a vertical profile u0(z) over x and y, then apply drained BC.
+    Broadcast a horizontal surface u0(x, y) uniformly across depth, then apply drained BC.
 
     Parameters
-    - u0_z: array-like shape (nz,) representing u(x,y,z,0) varying only with z
+    - u0_xy: array-like shape (nx, ny) representing u(x,y,z,0) varying with x,y only
     - nx, ny, nz: grid sizes
 
     Returns
     - U0: array shape (nx, ny, nz)
     """
-    u0_z = np.asarray(u0_z, dtype=float)
-    # Broadcast along x,y
-    U0 = np.broadcast_to(u0_z.reshape(1, 1, nz), (nx, ny, nz)).astype(float).copy()
+    u0_xy = np.asarray(u0_xy, dtype=float)
+    if u0_xy.shape != (nx, ny):
+        raise ValueError(f"u0_xy must have shape ({nx}, {ny}), got {u0_xy.shape}")
+
+    # Broadcast along z
+    U0 = np.repeat(u0_xy[:, :, None], nz, axis=2).astype(float).copy()
     # Enforce drained boundaries
     _apply_drained_dirichlet_bc(U0)
     return U0
@@ -84,10 +90,7 @@ def solve_terzaghi_3d_fdm(
     ny: int,
     nz: int,
     t_span: Tuple[float, float],
-    u0_z: Optional[np.ndarray] = None,
-    gp_params: Optional[dict] = None,
-    u0_ranges: Optional[Sequence[Tuple[float, float]]] = None,
-    seed: int = 42,
+    u0_xy: np.ndarray,
     t_eval: Optional[np.ndarray] = None,
     rtol: float = 1e-6,
     atol: float = 1e-9,
@@ -98,16 +101,14 @@ def solve_terzaghi_3d_fdm(
 
     PDE: du/dt = Cv * (uxx + uyy + uzz)
     BC: drained (Dirichlet u=0) on all six faces
-    IC: u(x,y,z,0) = u0(z), broadcast across x,y
+    IC: u(x,y,z,0) = u0(x, y), constant across depth
 
     Parameters
     - Cv: consolidation coefficient
     - x_range, y_range, z_range: (min, max) domain bounds
     - nx, ny, nz: number of grid points in x, y, z (including boundaries)
     - t_span: (t0, tf)
-    - u0_z: optional array of shape (nz,) for initial profile; if None, one
-      sample is generated via random_gaussian_pwp using gp_params and u0_ranges
-    - gp_params, u0_ranges, seed: parameters for random_gaussian_pwp when u0_z is None
+    - u0_xy: array of shape (nx, ny) for initial surface replicated across depth
     - t_eval: times at which to store the computed solution; defaults to 50 linspace samples
     - rtol, atol: tolerances for solve_ivp
 
@@ -125,11 +126,8 @@ def solve_terzaghi_3d_fdm(
     dy = (y_range[1] - y_range[0]) / float(ny - 1)
     dz = (z_range[1] - z_range[0]) / float(nz - 1)
 
-    if u0_z is None:
-        u0_z = random_gaussian_pwp(1, nz, z_range, gp_params, u0_ranges, seed)[0]
-
     # Build full 3D initial field and enforce drained boundaries
-    U0 = build_initial_field_from_profile(np.asarray(u0_z, dtype=float), nx, ny, nz)
+    U0 = build_initial_field_from_surface(np.asarray(u0_xy, dtype=float), nx, ny, nz)
 
     # Flatten helpers
     def _flatten(U: np.ndarray) -> np.ndarray:
