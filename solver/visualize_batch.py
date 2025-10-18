@@ -7,7 +7,7 @@ from solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm_batch
 
 
 CONFIG = {
-    "Cv": 1.0,
+    "Cv_batch": [1.0, 2.0, 3.0, 1.0],
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
@@ -22,7 +22,7 @@ CONFIG = {
     "u0_range": (10000, 20000),
     "seed": 42,
     "sample_indices": [0, 1, 2, 3],
-    "time_index": 0,
+    "time_index": -1,
     "y_section": 0.25,
     "keep_positive_side": True,
     "scatter_stride": 2,
@@ -39,6 +39,9 @@ CONFIG = {
 def main() -> None:
     cfg = CONFIG
     t_eval = np.linspace(cfg["t_span"][0], cfg["t_span"][1], cfg["n_times"])
+    Cv_batch = np.asarray(cfg["Cv_batch"], dtype=float)
+    if Cv_batch.shape[0] != cfg["batch_size"]:
+        raise ValueError("Cv_batch length must match batch_size.")
 
     u0_xy_batch = random_gaussian_pwp_batch(
         cfg["batch_size"],
@@ -55,7 +58,7 @@ def main() -> None:
     )
 
     result = solve_terzaghi_3d_fdm_batch(
-        Cv=cfg["Cv"],
+        Cv_batch=Cv_batch,
         x_range=cfg["x_range"],
         y_range=cfg["y_range"],
         z_range=cfg["z_range"],

@@ -71,7 +71,7 @@ def build_initial_field_from_surfaces(
 
 
 def solve_terzaghi_3d_fdm_batch(
-    Cv: float,
+    Cv_batch: TensorLike,
     x_range: Tuple[float, float],
     y_range: Tuple[float, float],
     z_range: Tuple[float, float],
@@ -83,7 +83,7 @@ def solve_terzaghi_3d_fdm_batch(
     t_eval: Optional[TensorLike] = None,
     *,
     dtype: torch.dtype = torch.float32,
-    device: Union[str, torch.device] = "cpu",
+    device: Union[str, torch.device] = "cuda",
     dt: Optional[float] = None,
     safety_factor: float = 0.9,
 ) -> Dict[str, torch.Tensor]:
@@ -91,7 +91,7 @@ def solve_terzaghi_3d_fdm_batch(
     Batched explicit finite-difference solver for Terzaghi's 3D consolidation PDE.
 
     Parameters
-    - Cv: consolidation coefficient
+    - Cv_batch: per-sample consolidation coefficients shaped (batch,)
     - x_range, y_range, z_range: (min, max) domain bounds
     - nx, ny, nz: grid resolution (includes boundaries)
     - t_span: (t0, tf)
@@ -127,8 +127,16 @@ def solve_terzaghi_3d_fdm_batch(
 
     U = build_initial_field_from_surfaces(u0_tensor, nx, ny, nz)
 
-    dt_limit = 1.0 / (2.0 * Cv * (inv_dx2 + inv_dy2 + inv_dz2))
-    max_step = dt if dt is not None else safety_factor * dt_limit
+    Cv_tensor = torch.as_tensor(Cv_batch, dtype=dtype, device=device).view(-1)
+    if Cv_tensor.shape[0] != batch:
+        raise ValueError(f"Cv_batch must have shape ({batch},)")
+    if torch.any(Cv_tensor <= 0):
+        raise ValueError("All Cv values must be positive.")
+
+    diffusion_scale = inv_dx2 + inv_dy2 + inv_dz2
+    dt_limits = 1.0 / (2.0 * Cv_tensor * diffusion_scale)
+    dt_limit = torch.min(dt_limits).item()
+    max_step = float(dt) if dt is not None else safety_factor * dt_limit
     if max_step <= 0 or max_step > dt_limit:
         raise ValueError("Choose dt within (0, stability_limit].")
 
@@ -151,7 +159,7 @@ def solve_terzaghi_3d_fdm_batch(
                     + (U[:, 1:-1, 2:, 1:-1] - 2.0 * core + U[:, 1:-1, :-2, 1:-1]) * inv_dy2
                     + (U[:, 1:-1, 1:-1, 2:] - 2.0 * core + U[:, 1:-1, 1:-1, :-2]) * inv_dz2
                 )
-                core.add_(sub_dt * Cv * lap)
+                core.add_(sub_dt * Cv_tensor.view(batch, 1, 1, 1) * lap)
                 _apply_drained_dirichlet_bc_(U)
 
             sols[:, idx] = U
