@@ -64,9 +64,10 @@ def compute_full_field(
     t_span = (float(time_samples[0]), float(time_samples[-1]))
 
     u0_tensor = torch.as_tensor(u0, dtype=torch_dtype).unsqueeze(0)
+    Cv_batch = torch.as_tensor([cv_value], dtype=torch_dtype)
 
     result = solve_terzaghi_3d_fdm_batch(
-        Cv=float(cv_value),
+        Cv_batch=Cv_batch,
         x_range=tuple(config["x_range"]),
         y_range=tuple(config["y_range"]),
         z_range=tuple(config["z_range"]),

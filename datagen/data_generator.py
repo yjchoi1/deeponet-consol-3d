@@ -20,8 +20,8 @@ from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm
 
 # Configuration for dataset generation parameters and solver setup.
 CONFIG: Dict[str, object] = {
-    "n_samples": 4,
-    "batch_size": 2,
+    "n_samples": 20,
+    "batch_size": 10,
     "points_per_sample": 2048,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
@@ -66,16 +66,6 @@ def biased_time_grid(
     times[0] = t_start
     times[-1] = t_end
     return times
-
-
-def enforce_planar_dirichlet_bc(plane: torch.Tensor) -> torch.Tensor:
-    """Set Dirichlet boundary values to zero on the outer rim of a 2D tensor."""
-    plane = plane.clone()
-    plane[0, :] = 0.0
-    plane[-1, :] = 0.0
-    plane[:, 0] = 0.0
-    plane[:, -1] = 0.0
-    return plane
 
 
 def sample_solution_points(
@@ -235,6 +225,9 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
         while sample_idx < n_samples:
             current_batch = min(batch_size, n_samples - sample_idx)
             batch_seed = seed + sample_idx
+            start_idx = sample_idx + 1
+            end_idx = sample_idx + current_batch
+            print(f"Generating samples {start_idx}-{end_idx} / {n_samples}")
             u0_batch = random_gaussian_pwp_batch(
                 current_batch,
                 nx,
@@ -250,30 +243,41 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 dtype=torch_dtype,
             )
 
+            cv_values = rng.uniform(cv_min, cv_max, size=current_batch).astype(
+                np.float32
+            )
+            Cv_batch = torch.as_tensor(
+                cv_values, dtype=torch_dtype, device=u0_batch.device
+            )
+
+            # Solve PDE for the sampled initial fields using per-sample Cv values.
+            solver_result = solve_terzaghi_3d_fdm_batch(
+                Cv_batch=Cv_batch,
+                x_range=x_range,
+                y_range=y_range,
+                z_range=z_range,
+                nx=nx,
+                ny=ny,
+                nz=nz,
+                t_span=t_span,
+                u0_xy_batch=u0_batch,
+                t_eval=time_samples,
+                dtype=torch_dtype,
+            )
+
+            # fields are different for each sample in batch
+            batch_fields = solver_result["u"].cpu().numpy() 
+            # times are shared across all samples in batch. This avoids creating a new time array for each sample.
+            batch_times = solver_result["t"].cpu().numpy()  
+
             for local_idx in range(current_batch):
-                cv_value = float(rng.uniform(cv_min, cv_max))
-                u0_xy = enforce_planar_dirichlet_bc(u0_batch[local_idx])
+                field = batch_fields[local_idx]
+                cv_value = float(cv_values[local_idx])
 
-                # Solve PDE for the sampled initial field and consolidation coefficient.
-                solver_result = solve_terzaghi_3d_fdm_batch(
-                    Cv=cv_value,
-                    x_range=x_range,
-                    y_range=y_range,
-                    z_range=z_range,
-                    nx=nx,
-                    ny=ny,
-                    nz=nz,
-                    t_span=t_span,
-                    u0_xy_batch=u0_xy[None],
-                    t_eval=time_samples,
-                    dtype=torch_dtype,
-                )
-
-                field = solver_result["u"][0].cpu().numpy()
                 # Draw random space-time query points and evaluate the solution there.
                 points, values = sample_solution_points(
                     field,
-                    solver_result["t"].cpu().numpy(),
+                    batch_times,
                     xs,
                     ys,
                     zs,
@@ -282,7 +286,7 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 )
 
                 # Save branch inputs, trunk inputs, and targets into HDF5 datasets.
-                dset_u[sample_idx] = u0_xy.cpu().numpy()
+                dset_u[sample_idx] = u0_batch[local_idx].cpu().numpy()
                 dset_cv[sample_idx] = cv_value
                 dset_points[sample_idx] = points
                 dset_values[sample_idx] = values
