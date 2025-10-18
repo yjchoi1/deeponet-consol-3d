@@ -14,7 +14,7 @@ CONFIG: Dict[str, object] = {
     "batch_size": 2048,
     "shuffle": False,
     "num_workers": 0,
-    "pin_memory": False,
+    "pin_memory": True,
     "drop_last": False,
     "dtype": "float32",
     "flatten_branch": True,
@@ -39,9 +39,12 @@ class DeepONetPointDataset(Dataset):
         self.torch_dtype = getattr(torch, str(cfg.get("dtype", "float32")))
         self.flatten_branch = bool(cfg.get("flatten_branch", True))
 
+        # Use solve the PDE for each u0, so we evaluate the solutions `u_data.shape[0]` times.
         self.num_solutions = int(self.u_data.shape[0])
+        # For each solution, we evaluate the solution at `coord_data.shape[1]` points.
         self.points_per_solution = int(self.coord_data.shape[1])
 
+        # We can optionally sample a subset of the entire training examples.
         samples_per_epoch = cfg.get("samples_per_epoch")
         if samples_per_epoch is None:
             samples_per_epoch = self.num_solutions * self.points_per_solution

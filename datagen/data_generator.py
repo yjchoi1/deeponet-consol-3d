@@ -20,8 +20,8 @@ from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm
 
 # Configuration for dataset generation parameters and solver setup.
 CONFIG: Dict[str, object] = {
-    "n_samples": 20,
-    "batch_size": 10,
+    "n_samples": 1000,
+    "batch_size": 100,
     "points_per_sample": 2048,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
@@ -220,14 +220,19 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
             }
         )
 
-        sample_idx = 0
-        # Iterate over batches to limit solver memory footprint while covering all samples.
-        while sample_idx < n_samples:
-            current_batch = min(batch_size, n_samples - sample_idx)
-            batch_seed = seed + sample_idx
-            start_idx = sample_idx + 1
-            end_idx = sample_idx + current_batch
-            print(f"Generating samples {start_idx}-{end_idx} / {n_samples}")
+        # Precompute Cv values and sort indices for bucketing by similar Cv
+        cv_all_values = rng.uniform(cv_min, cv_max, size=n_samples).astype(np.float32)
+        sorted_indices = np.argsort(cv_all_values)
+
+        # Iterate over batches in order of increasing Cv to reduce solver step shrinkage.
+        for offset in range(0, n_samples, batch_size):
+            batch_indices = sorted_indices[offset : offset + batch_size]
+            current_batch = int(batch_indices.shape[0])
+            batch_seed = seed + offset
+            start_idx = int(offset + 1)
+            end_idx = int(offset + current_batch)
+            print(f"Generating samples {start_idx}-{end_idx} / {n_samples} (Cv-sorted)")
+
             u0_batch = random_gaussian_pwp_batch(
                 current_batch,
                 nx,
@@ -243,12 +248,8 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 dtype=torch_dtype,
             )
 
-            cv_values = rng.uniform(cv_min, cv_max, size=current_batch).astype(
-                np.float32
-            )
-            Cv_batch = torch.as_tensor(
-                cv_values, dtype=torch_dtype, device=u0_batch.device
-            )
+            cv_values = cv_all_values[batch_indices]
+            Cv_batch = torch.as_tensor(cv_values, dtype=torch_dtype, device=u0_batch.device)
 
             # Solve PDE for the sampled initial fields using per-sample Cv values.
             solver_result = solve_terzaghi_3d_fdm_batch(
@@ -266,11 +267,12 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
             )
 
             # fields are different for each sample in batch
-            batch_fields = solver_result["u"].cpu().numpy() 
+            batch_fields = solver_result["u"].cpu().numpy()
             # times are shared across all samples in batch. This avoids creating a new time array for each sample.
-            batch_times = solver_result["t"].cpu().numpy()  
+            batch_times = solver_result["t"].cpu().numpy()
 
             for local_idx in range(current_batch):
+                sample_id = int(batch_indices[local_idx])
                 field = batch_fields[local_idx]
                 cv_value = float(cv_values[local_idx])
 
@@ -286,12 +288,10 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 )
 
                 # Save branch inputs, trunk inputs, and targets into HDF5 datasets.
-                dset_u[sample_idx] = u0_batch[local_idx].cpu().numpy()
-                dset_cv[sample_idx] = cv_value
-                dset_points[sample_idx] = points
-                dset_values[sample_idx] = values
-
-                sample_idx += 1
+                dset_u[sample_id] = u0_batch[local_idx].cpu().numpy()
+                dset_cv[sample_id] = cv_value
+                dset_points[sample_id] = points
+                dset_values[sample_id] = values
 
 
 if __name__ == "__main__":
