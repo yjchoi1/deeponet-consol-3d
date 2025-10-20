@@ -57,6 +57,10 @@ class DeepONetPointDataset(Dataset):
         return self.samples_per_epoch
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
+        # We sample a random (solution_idx, point_idx) inside __getitem__.
+        # DataLoader's `shuffle` only permutes dataset indices; it does not
+        # control this internal random sampling. With a fixed seed, we derive
+        # a deterministic RNG per index for reproducibility across epochs.
         if self.base_seed is None:
             rng = np.random.default_rng()
         else:
