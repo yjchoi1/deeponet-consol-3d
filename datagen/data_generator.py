@@ -164,6 +164,17 @@ def sample_solution_points(
     return points, values
 
 
+def enforce_drained_dirichlet_bc(u_batch: torch.Tensor) -> torch.Tensor:
+    """Clamp horizontal surfaces to zero along the drained boundaries."""
+    if u_batch.ndim != 3:
+        raise ValueError("u_batch must have shape (batch, nx, ny)")
+    u_batch[:, 0, :] = 0.0
+    u_batch[:, -1, :] = 0.0
+    u_batch[:, :, 0] = 0.0
+    u_batch[:, :, -1] = 0.0
+    return u_batch
+
+
 def generate_training_data(cfg: Dict[str, object]) -> None:
     """Generate DeepONet training samples and store them in an HDF5 file."""
     n_samples = int(cfg["n_samples"])
@@ -247,6 +258,9 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 seed=batch_seed,
                 dtype=torch_dtype,
             )
+
+            # Ensure stored branch inputs match the drained boundaries seen by the solver.
+            u0_batch = enforce_drained_dirichlet_bc(u0_batch)
 
             cv_values = cv_all_values[batch_indices]
             Cv_batch = torch.as_tensor(cv_values, dtype=torch_dtype, device=u0_batch.device)
