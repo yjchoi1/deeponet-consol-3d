@@ -209,6 +209,15 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with h5py.File(output_path, "w") as h5_file:
+        # Running totals for normalization statistics.
+        u_sum = torch.zeros((nx, ny), dtype=torch.float64)
+        u_sq_sum = torch.zeros((nx, ny), dtype=torch.float64)
+        cv_sum = 0.0
+        cv_sq_sum = 0.0
+        coord_sum = np.zeros(4, dtype=np.float64)
+        coord_sq_sum = np.zeros(4, dtype=np.float64)
+        coord_count = 0
+
         # Allocate datasets for DeepONet components: branch input, trunk input, outputs.
         dset_u = h5_file.create_dataset("u", (n_samples, nx, ny), dtype="float32")
         dset_cv = h5_file.create_dataset("Cv", (n_samples,), dtype="float32")
@@ -306,6 +315,44 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 dset_cv[sample_id] = cv_value
                 dset_points[sample_id] = points
                 dset_values[sample_id] = values
+
+                # Update normalization statistics using double precision to reduce drift.
+                u_tensor = u0_batch[local_idx].to(dtype=torch.float64)
+                u_sum.add_(u_tensor)
+                u_sq_sum.add_(u_tensor * u_tensor)
+
+                cv_sum += cv_value
+                cv_sq_sum += cv_value * cv_value
+
+                points64 = points.astype(np.float64, copy=False)
+                coord_sum += points64.sum(axis=0)
+                coord_sq_sum += np.square(points64).sum(axis=0)
+                coord_count += points.shape[0]
+
+        eps = 1.0e-6
+        u_sum_np = u_sum.cpu().numpy()
+        u_sq_sum_np = u_sq_sum.cpu().numpy()
+        u_mean = u_sum_np / float(n_samples)
+        u_var = (u_sq_sum_np / float(n_samples)) - np.square(u_mean)
+        u_std = np.sqrt(np.maximum(u_var, eps)).astype(np.float32)
+
+        cv_mean = cv_sum / float(n_samples)
+        cv_var = (cv_sq_sum / float(n_samples)) - cv_mean * cv_mean
+        cv_std = float(np.sqrt(max(cv_var, eps)))
+
+        coord_mean = coord_sum / float(coord_count)
+        coord_var = (coord_sq_sum / float(coord_count)) - np.square(coord_mean)
+        coord_std = np.sqrt(np.maximum(coord_var, eps)).astype(np.float32)
+
+        stats_group = h5_file.create_group("stats")
+        stats_group.create_dataset("u_mean", data=u_mean.astype(np.float32))
+        stats_group.create_dataset("u_std", data=u_std)
+        stats_group.create_dataset("cv_mean", data=np.asarray(cv_mean, dtype=np.float32))
+        stats_group.create_dataset("cv_std", data=np.asarray(cv_std, dtype=np.float32))
+        stats_group.create_dataset("coord_mean", data=coord_mean.astype(np.float32))
+        stats_group.create_dataset("coord_std", data=coord_std)
+        stats_group.attrs["u_count"] = int(n_samples)
+        stats_group.attrs["coord_count"] = int(coord_count)
 
 
 if __name__ == "__main__":

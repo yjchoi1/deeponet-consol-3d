@@ -84,17 +84,7 @@ class SplitPointDataset(DeepONetPointDataset):
         target = float(self.target_data[solution_idx, point_idx])
         cv_scalar = float(self.cv_data[solution_idx])
 
-        if self.flatten_branch:
-            branch_input = u0.reshape(-1)
-        else:
-            branch_input = u0
-
-        return {
-            "u": torch.as_tensor(branch_input, dtype=self.torch_dtype),
-            "cv": torch.as_tensor([cv_scalar], dtype=self.torch_dtype),
-            "coord": torch.as_tensor(coord, dtype=self.torch_dtype),
-            "s": torch.as_tensor([target], dtype=self.torch_dtype),
-        }
+        return self._prepare_sample(u0, coord, cv_scalar, target)
 
 
 def split_solution_indices(

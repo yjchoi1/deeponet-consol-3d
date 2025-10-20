@@ -36,6 +36,22 @@ class DeepONetPointDataset(Dataset):
         self.coord_data = self.file["y"]
         self.target_data = self.file["s"]
 
+        stats_group = self.file.get("stats")
+        if stats_group is None:
+            raise RuntimeError(
+                "Normalization statistics not found in dataset. "
+                "Regenerate data with updated generator to include 'stats' group."
+            )
+        self.u_mean = np.asarray(stats_group["u_mean"], dtype=np.float32)
+        u_std = np.asarray(stats_group["u_std"], dtype=np.float32)
+        self.u_std = np.maximum(u_std, 1.0e-6)
+        self.cv_mean = float(np.asarray(stats_group["cv_mean"], dtype=np.float32))
+        cv_std = float(np.asarray(stats_group["cv_std"], dtype=np.float32))
+        self.cv_std = max(cv_std, 1.0e-6)
+        self.coord_mean = np.asarray(stats_group["coord_mean"], dtype=np.float32)
+        coord_std = np.asarray(stats_group["coord_std"], dtype=np.float32)
+        self.coord_std = np.maximum(coord_std, 1.0e-6)
+
         self.torch_dtype = getattr(torch, str(cfg.get("dtype", "float32")))
         self.flatten_branch = bool(cfg.get("flatten_branch", True))
 
@@ -56,6 +72,30 @@ class DeepONetPointDataset(Dataset):
     def __len__(self) -> int:
         return self.samples_per_epoch
 
+    def _prepare_sample(
+        self,
+        u0: np.ndarray,
+        coord: np.ndarray,
+        cv_scalar: float,
+        target: float,
+    ) -> Dict[str, torch.Tensor]:
+        """Normalize sample components and convert them to tensors."""
+        u_norm = (u0 - self.u_mean) / self.u_std
+        if self.flatten_branch:
+            branch_input = u_norm.reshape(-1)
+        else:
+            branch_input = u_norm
+
+        cv_norm = (cv_scalar - self.cv_mean) / self.cv_std
+        coord_norm = (coord - self.coord_mean) / self.coord_std
+
+        return {
+            "u": torch.as_tensor(branch_input, dtype=self.torch_dtype),
+            "cv": torch.as_tensor([cv_norm], dtype=self.torch_dtype),
+            "coord": torch.as_tensor(coord_norm, dtype=self.torch_dtype),
+            "s": torch.as_tensor([target], dtype=self.torch_dtype),
+        }
+
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         # We sample a random (solution_idx, point_idx) inside __getitem__.
         # DataLoader's `shuffle` only permutes dataset indices; it does not
@@ -74,17 +114,7 @@ class DeepONetPointDataset(Dataset):
         target = float(self.target_data[solution_idx, point_idx])
         cv_scalar = float(self.cv_data[solution_idx])
 
-        if self.flatten_branch:
-            branch_input = u0.reshape(-1)
-        else:
-            branch_input = u0
-
-        return {
-            "u": torch.as_tensor(branch_input, dtype=self.torch_dtype),
-            "cv": torch.as_tensor([cv_scalar], dtype=self.torch_dtype),
-            "coord": torch.as_tensor(coord, dtype=self.torch_dtype),
-            "s": torch.as_tensor([target], dtype=self.torch_dtype),
-        }
+        return self._prepare_sample(u0, coord, cv_scalar, target)
 
     def __del__(self) -> None:
         file_handle = getattr(self, "file", None)
