@@ -207,7 +207,16 @@ def main(cfg: DictConfig) -> None:
 
     device = torch.device(train_cfg.device)
 
+    print("Building data loaders...")
     train_loader, val_loader = build_dataloaders(cfg)
+    print(
+        "  Train dataset size: "
+        f"{len(train_loader.dataset)} samples ({len(train_loader)} batches)"
+    )
+    print(
+        "  Validation dataset size: "
+        f"{len(val_loader.dataset)} samples ({len(val_loader)} batches)"
+    )
 
     model_config = OmegaConf.to_container(model_cfg, resolve=True)
     assert isinstance(model_config, dict)
@@ -229,8 +238,14 @@ def main(cfg: DictConfig) -> None:
     if train_cfg.resume:
         latest_ckpt = get_latest_checkpoint(ckpt_dir)
         if latest_ckpt:
+            print(f"Resuming from checkpoint: {latest_ckpt.name}")
             start_epoch, global_step = load_checkpoint(latest_ckpt, model, optimizer, device)
+            print(f"  Loaded epoch {start_epoch} with global_step {global_step}.")
             start_epoch += 1
+        else:
+            print("No checkpoint found. Starting from scratch.")
+    else:
+        print("Checkpoint resume disabled; starting from scratch.")
 
     epochs = int(train_cfg.epochs)
     print_every = int(train_cfg.print_every)
@@ -239,6 +254,8 @@ def main(cfg: DictConfig) -> None:
     grad_clip_norm = float(grad_clip_norm_cfg) if grad_clip_norm_cfg is not None else None
 
     history = []
+
+    print(f"Starting training for {epochs - start_epoch} epochs (from epoch {start_epoch + 1}).")
 
     for epoch in range(start_epoch, epochs):
         train_loss, train_samples, steps = train_one_epoch(
