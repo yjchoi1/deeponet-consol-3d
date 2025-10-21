@@ -7,14 +7,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
-import math
-from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-import h5py
-import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from data_loader import DeepONetPointDataset
@@ -22,14 +18,20 @@ from deeponet import build_model
 
 CONFIG: Dict[str, object] = {
     "data": {
-        "data_path": Path("train/data/deeponet_terzaghi.h5"),
         "batch_size": 2048,
+        "num_workers": 0,
+        "pin_memory": True,
+        "drop_last": False,
         "flatten_branch": True,
         "dtype": "float32",
-        "seed": 42,
-        "train_samples_per_epoch": 200_000,
-        "val_samples_per_epoch": 40_000,
-        "val_fraction": 0.1,
+        "train": {
+            "data_path": Path("train/data/deeponet_terzaghi_train.h5"),
+            "seed": 42,
+        },
+        "val": {
+            "data_path": Path("train/data/deeponet_terzaghi_val.h5"),
+            "seed": 43,
+        },
     },
     "model": {},
     "training": {
@@ -38,8 +40,8 @@ CONFIG: Dict[str, object] = {
         "weight_decay": 1.0e-4,
         "checkpoint_dir": Path("train/checkpoints"),
         "log_dir": Path("train/runs/deeponet"),
-        "resume": True,
-        "print_every": 50,
+        "resume": False,
+        "print_every": 1,
         "checkpoint_interval": 1,
         "grad_clip_norm": None,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
@@ -47,106 +49,45 @@ CONFIG: Dict[str, object] = {
 }
 
 
-class SplitPointDataset(DeepONetPointDataset):
-    """Dataset restricted to a subset of solution fields."""
-
-    def __init__(
-        self,
-        cfg: Dict[str, object],
-        solution_indices: Iterable[int],
-        *,
-        samples_per_epoch: Optional[int] = None,
-        seed_offset: int = 0,
-    ) -> None:
-        cfg_local = cfg.copy()
-        if samples_per_epoch is not None:
-            cfg_local["samples_per_epoch"] = samples_per_epoch
-        if cfg_local.get("seed") is not None:
-            cfg_local["seed"] = int(cfg_local["seed"]) + seed_offset
-
-        super().__init__(cfg_local)
-        indices = np.asarray(list(solution_indices), dtype=np.int32)
-        self.solution_indices = indices
-        self.num_solutions = int(indices.shape[0])
-
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        if self.base_seed is None:
-            rng = np.random.default_rng()
-        else:
-            rng = np.random.default_rng(self.base_seed + index)
-
-        local_idx = int(rng.integers(0, self.num_solutions))
-        solution_idx = int(self.solution_indices[local_idx])
-        point_idx = int(rng.integers(0, self.points_per_solution))
-
-        u0 = np.asarray(self.u_data[solution_idx], dtype=np.float32)
-        coord = np.asarray(self.coord_data[solution_idx, point_idx], dtype=np.float32)
-        target = float(self.target_data[solution_idx, point_idx])
-        cv_scalar = float(self.cv_data[solution_idx])
-
-        return self._prepare_sample(u0, coord, cv_scalar, target)
-
-
-def split_solution_indices(
-    data_path: Path, val_fraction: float, seed: Optional[int]
-) -> Tuple[np.ndarray, np.ndarray]:
-    with h5py.File(data_path, "r") as file:
-        total_solutions = int(file["u"].shape[0])
-
-    rng = np.random.default_rng(seed)
-    indices = rng.permutation(total_solutions)
-    val_size = max(1, int(math.ceil(total_solutions * val_fraction)))
-    val_indices = indices[:val_size]
-    train_indices = indices[val_size:]
-    return train_indices, val_indices
-
-
 def build_dataloaders(cfg: Dict[str, object]) -> Tuple[DataLoader, DataLoader]:
     data_cfg = cfg["data"]
-    data_path = Path(data_cfg["data_path"])  # type: ignore[arg-type]
     batch_size = int(data_cfg["batch_size"])
-    seed = data_cfg.get("seed")
-    val_fraction = float(data_cfg.get("val_fraction", 0.1))
-    
-    # You can optionally control the number of samples per epoch for training and validation.
-    # If not specified, we use all available samples for each epoch. `DeepONetPointDataset` will handle this.
-    train_samples_per_epoch = data_cfg.get("train_samples_per_epoch")
-    val_samples_per_epoch = data_cfg.get("val_samples_per_epoch")
-    
-    train_indices, val_indices = split_solution_indices(data_path, val_fraction, seed)
 
-    train_dataset = SplitPointDataset(
-        data_cfg,
-        train_indices,
-        samples_per_epoch=train_samples_per_epoch,
-        seed_offset=0,
-    )
-    val_dataset = SplitPointDataset(
-        data_cfg,
-        val_indices,
-        samples_per_epoch=val_samples_per_epoch,
-        seed_offset=10_000,
-    )
+    shared_dataset_options = {
+        "flatten_branch": data_cfg["flatten_branch"],
+        "dtype": data_cfg["dtype"],
+    }
 
-    num_workers = int(data_cfg.get("num_workers", 0) or 0)
-    pin_memory = bool(data_cfg.get("pin_memory", True))
-    drop_last = bool(data_cfg.get("drop_last", False))
+    train_dataset = DeepONetPointDataset(
+        {
+            **shared_dataset_options,
+            "data_path": data_cfg["train"]["data_path"],
+            "seed": int(data_cfg["train"]["seed"]),
+        }
+    )
+    val_dataset = DeepONetPointDataset(
+        {
+            **shared_dataset_options,
+            "data_path": data_cfg["val"]["data_path"],
+            "seed": int(data_cfg["val"]["seed"]),
+        }
+    )
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        drop_last=drop_last,
+        num_workers=int(data_cfg["num_workers"]),
+        pin_memory=bool(data_cfg["pin_memory"]),
+        drop_last=bool(data_cfg["drop_last"]),
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
+        num_workers=int(data_cfg["num_workers"]),
+        pin_memory=bool(data_cfg["pin_memory"]),
         drop_last=False,
     )
 
@@ -289,17 +230,17 @@ def main() -> None:
 
     start_epoch = 0
     global_step = 0
-    if train_cfg.get("resume", True):
+    if train_cfg["resume"]:
         latest_ckpt = get_latest_checkpoint(ckpt_dir)
         if latest_ckpt:
             start_epoch, global_step = load_checkpoint(latest_ckpt, model, optimizer, device)
             start_epoch += 1
 
     epochs = int(train_cfg["epochs"])
-    print_every = int(train_cfg.get("print_every", 50))
-    checkpoint_interval = int(train_cfg.get("checkpoint_interval", 1))
-    grad_clip_norm = train_cfg.get("grad_clip_norm")
-    grad_clip_norm = float(grad_clip_norm) if grad_clip_norm else None
+    print_every = int(train_cfg["print_every"])
+    checkpoint_interval = int(train_cfg["checkpoint_interval"])
+    grad_clip_norm_cfg = train_cfg["grad_clip_norm"]
+    grad_clip_norm = float(grad_clip_norm_cfg) if grad_clip_norm_cfg is not None else None
 
     history = []
 
