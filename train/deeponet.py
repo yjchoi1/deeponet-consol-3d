@@ -1,30 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Tuple
+from typing import Dict, Mapping
 
 import torch
 import torch.nn as nn
-
-
-CONFIG: Dict[str, object] = {
-    "branch": {
-        "input_dim": 41 * 41,
-        "hidden_dim": 256,
-        "output_dim": 128,
-        "num_blocks": 3,
-    },
-    "trunk": {
-        "input_dim": 2 * 128,
-        "hidden_dim": 256,
-        "output_dim": 128,
-        "num_blocks": 3,
-    },
-    "ff_features": 128,
-    "ff_sigma": 1.0,
-    "device": "cpu",
-    "dtype": "float32",
-}
 
 
 def random_fourier_matrix(
@@ -106,19 +86,13 @@ class DeepONet3D(nn.Module):
         return combined + self.bias
 
 
-def build_model(overrides: Dict[str, object] | None = None) -> DeepONet3D:
-    cfg = CONFIG.copy()
-    if overrides:
-        cfg.update(overrides)
-
-    device = torch.device(cfg.get("device", "cpu"))
-    dtype = getattr(torch, cfg.get("dtype", "float32"))
-
-    branch_cfg = cfg["branch"].copy()  # type: ignore[assignment]
-    trunk_cfg = cfg["trunk"].copy()  # type: ignore[assignment]
-
+def build_model(cfg: Mapping[str, object]) -> DeepONet3D:
+    branch_cfg = dict(cfg["branch"])  # type: ignore[arg-type]
+    trunk_cfg = dict(cfg["trunk"])  # type: ignore[arg-type]
     ff_sigma = float(cfg["ff_sigma"])
     ff_features = int(cfg["ff_features"])
+    device = torch.device(cfg["device"])  # type: ignore[arg-type]
+    dtype = getattr(torch, str(cfg["dtype"]))
 
     # Trunk expects twice the random feature dimension after sin/cos concatenation.
     trunk_cfg["input_dim"] = ff_features * 2

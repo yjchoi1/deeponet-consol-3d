@@ -1,0 +1,53 @@
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: false
+
+data:
+  batch_size: 2048
+  num_workers: 0
+  pin_memory: true
+  flatten_branch: true
+  dtype: float32
+  train:
+    data_path: train/data/deeponet_terzaghi_train.h5
+    seed: 42
+    shuffle: false
+    drop_last: false
+  val:
+    data_path: train/data/deeponet_terzaghi_val.h5
+    seed: 43
+    shuffle: false
+    drop_last: false
+
+model:
+  branch:
+    input_dim: 1681  # 41 * 41
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3
+  trunk:
+    input_dim: 256
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3
+  ff_features: 128
+  ff_sigma: 1.0
+  dtype: float32
+  device: ${training.device}
+
+training:
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  checkpoint_dir: train/checkpoints
+  log_dir: train/runs/deeponet
+  resume: true
+  print_every: 50
+  checkpoint_interval: 1
+  grad_clip_norm: null
+  device: cuda

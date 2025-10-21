@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
 # Add project root to Python path for imports
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-
-from typing import Dict, Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader
@@ -16,79 +18,50 @@ from torch.utils.tensorboard import SummaryWriter
 from data_loader import DeepONetPointDataset
 from deeponet import build_model
 
-CONFIG: Dict[str, object] = {
-    "data": {
-        "batch_size": 2048,
-        "num_workers": 0,
-        "pin_memory": True,
-        "drop_last": False,
-        "flatten_branch": True,
-        "dtype": "float32",
-        "train": {
-            "data_path": Path("train/data/deeponet_terzaghi_train.h5"),
-            "seed": 42,
-        },
-        "val": {
-            "data_path": Path("train/data/deeponet_terzaghi_val.h5"),
-            "seed": 43,
-        },
-    },
-    "model": {},
-    "training": {
-        "epochs": 50,
-        "learning_rate": 1.0e-4,
-        "weight_decay": 1.0e-4,
-        "checkpoint_dir": Path("train/checkpoints"),
-        "log_dir": Path("train/runs/deeponet"),
-        "resume": False,
-        "print_every": 1,
-        "checkpoint_interval": 1,
-        "grad_clip_norm": None,
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
-    },
-}
 
-
-def build_dataloaders(cfg: Dict[str, object]) -> Tuple[DataLoader, DataLoader]:
-    data_cfg = cfg["data"]
-    batch_size = int(data_cfg["batch_size"])
+def build_dataloaders(cfg: DictConfig) -> Tuple[DataLoader, DataLoader]:
+    data_cfg = cfg.data
+    batch_size = int(data_cfg.batch_size)
 
     shared_dataset_options = {
-        "flatten_branch": data_cfg["flatten_branch"],
-        "dtype": data_cfg["dtype"],
+        "flatten_branch": bool(data_cfg.flatten_branch),
+        "dtype": str(data_cfg.dtype),
     }
 
+    train_seed = data_cfg.train.seed
     train_dataset = DeepONetPointDataset(
         {
             **shared_dataset_options,
-            "data_path": data_cfg["train"]["data_path"],
-            "seed": int(data_cfg["train"]["seed"]),
+            "data_path": Path(data_cfg.train.data_path),
+            "seed": None if train_seed is None else int(train_seed),
         }
     )
+
+    val_seed = data_cfg.val.seed
     val_dataset = DeepONetPointDataset(
         {
             **shared_dataset_options,
-            "data_path": data_cfg["val"]["data_path"],
-            "seed": int(data_cfg["val"]["seed"]),
+            "data_path": Path(data_cfg.val.data_path),
+            "seed": None if val_seed is None else int(val_seed),
         }
     )
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=False,
-        num_workers=int(data_cfg["num_workers"]),
-        pin_memory=bool(data_cfg["pin_memory"]),
-        drop_last=bool(data_cfg["drop_last"]),
+        shuffle=bool(data_cfg.train.shuffle),
+        num_workers=int(data_cfg.num_workers),
+        pin_memory=bool(data_cfg.pin_memory),
+        drop_last=bool(data_cfg.train.drop_last),
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
-        shuffle=False,
-        num_workers=int(data_cfg["num_workers"]),
-        pin_memory=bool(data_cfg["pin_memory"]),
-        drop_last=False,
+        shuffle=bool(data_cfg.val.shuffle),
+        num_workers=int(data_cfg.num_workers),
+        pin_memory=bool(data_cfg.pin_memory),
+        drop_last=bool(data_cfg.val.drop_last),
     )
 
     return train_loader, val_loader
@@ -205,41 +178,48 @@ def evaluate(
     return avg_loss, total_samples
 
 
-def main() -> None:
-    cfg = CONFIG.copy()
-    data_cfg = cfg["data"]
-    train_cfg = cfg["training"]
-    model_cfg = cfg["model"]
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    print("Running with configuration:\n" + OmegaConf.to_yaml(cfg))
 
-    device = torch.device(train_cfg["device"])
+    cfg_export = OmegaConf.to_container(cfg, resolve=True)
+    assert isinstance(cfg_export, dict)
+
+    data_cfg = cfg.data
+    train_cfg = cfg.training
+    model_cfg = cfg.model
+
+    device = torch.device(train_cfg.device)
 
     train_loader, val_loader = build_dataloaders(cfg)
 
-    model = build_model({"device": device, **model_cfg}).to(device)
+    model_config = OmegaConf.to_container(model_cfg, resolve=True)
+    assert isinstance(model_config, dict)
+    model = build_model(model_config)
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(train_cfg["learning_rate"]),
-        weight_decay=float(train_cfg["weight_decay"]),
+        lr=float(train_cfg.learning_rate),
+        weight_decay=float(train_cfg.weight_decay),
     )
 
-    ckpt_dir = Path(train_cfg["checkpoint_dir"])
-    log_dir = Path(train_cfg["log_dir"])
+    ckpt_dir = Path(train_cfg.checkpoint_dir)
+    log_dir = Path(train_cfg.log_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
 
     start_epoch = 0
     global_step = 0
-    if train_cfg["resume"]:
+    if train_cfg.resume:
         latest_ckpt = get_latest_checkpoint(ckpt_dir)
         if latest_ckpt:
             start_epoch, global_step = load_checkpoint(latest_ckpt, model, optimizer, device)
             start_epoch += 1
 
-    epochs = int(train_cfg["epochs"])
-    print_every = int(train_cfg["print_every"])
-    checkpoint_interval = int(train_cfg["checkpoint_interval"])
-    grad_clip_norm_cfg = train_cfg["grad_clip_norm"]
+    epochs = int(train_cfg.epochs)
+    print_every = int(train_cfg.print_every)
+    checkpoint_interval = int(train_cfg.checkpoint_interval)
+    grad_clip_norm_cfg = train_cfg.grad_clip_norm
     grad_clip_norm = float(grad_clip_norm_cfg) if grad_clip_norm_cfg is not None else None
 
     history = []
@@ -262,7 +242,7 @@ def main() -> None:
         writer.add_scalar("samples/val", val_samples, epoch)
 
         if ((epoch + 1) % checkpoint_interval == 0) or ((epoch + 1) == epochs):
-            save_checkpoint(ckpt_dir, epoch, model, optimizer, cfg, global_step)
+            save_checkpoint(ckpt_dir, epoch, model, optimizer, cfg_export, global_step)
 
         history.append((epoch + 1, train_loss, val_loss))
 
