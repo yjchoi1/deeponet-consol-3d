@@ -167,6 +167,10 @@ def solve_terzaghi_3d_fdm_batch(
 
     _apply_drained_dirichlet_bc_(sols)
 
+    # Simple NaN check on the final solution tensor
+    if torch.isnan(sols).any():
+        raise ValueError("NaN encountered in solution tensor 'u'.")
+
     return {
         "t": times,
         "u": sols,
