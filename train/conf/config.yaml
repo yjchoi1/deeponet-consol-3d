@@ -51,3 +51,5 @@ training:
   checkpoint_interval: 1
   grad_clip_norm: null
   device: cuda
+  log_every_steps: 10
+  verbose: false
