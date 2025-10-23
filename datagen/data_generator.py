@@ -20,9 +20,9 @@ from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm
 
 # Configuration for dataset generation parameters and solver setup.
 CONFIG: Dict[str, object] = {
-    "n_samples": 1000,
-    "batch_size": 100,
-    "points_per_sample": 2048,
+    "n_samples": 100,
+    "batch_size": 20,
+    "points_per_sample": 8192,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
@@ -36,7 +36,7 @@ CONFIG: Dict[str, object] = {
     "gp_output_scale": 500.0,
     "gp_length_scale_xy": 0.15,
     "u0_ranges": [(10_000.0, 20_000.0)],
-    "output_path": Path("train/data/deeponet_terzaghi.h5"),
+    "output_path": Path("train/data/deeponet_terzaghi_train.h5"),
     "seed": 42,
     "torch_dtype": "float32",
 }
@@ -217,6 +217,8 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
         coord_sum = np.zeros(4, dtype=np.float64)
         coord_sq_sum = np.zeros(4, dtype=np.float64)
         coord_count = 0
+        s_sum = 0.0
+        s_sq_sum = 0.0
 
         # Allocate datasets for DeepONet components: branch input, trunk input, outputs.
         dset_u = h5_file.create_dataset("u", (n_samples, nx, ny), dtype="float32")
@@ -329,28 +331,37 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 coord_sq_sum += np.square(points64).sum(axis=0)
                 coord_count += points.shape[0]
 
-        eps = 1.0e-6
+                values64 = values.astype(np.float64, copy=False)
+                s_sum += values64.sum()
+                s_sq_sum += np.square(values64).sum()
+
         u_sum_np = u_sum.cpu().numpy()
         u_sq_sum_np = u_sq_sum.cpu().numpy()
         u_mean = u_sum_np / float(n_samples)
         u_var = (u_sq_sum_np / float(n_samples)) - np.square(u_mean)
-        u_std = np.sqrt(np.maximum(u_var, eps)).astype(np.float32)
+        u_std = np.sqrt(u_var)
 
         cv_mean = cv_sum / float(n_samples)
         cv_var = (cv_sq_sum / float(n_samples)) - cv_mean * cv_mean
-        cv_std = float(np.sqrt(max(cv_var, eps)))
+        cv_std = np.sqrt(cv_var)
 
         coord_mean = coord_sum / float(coord_count)
         coord_var = (coord_sq_sum / float(coord_count)) - np.square(coord_mean)
-        coord_std = np.sqrt(np.maximum(coord_var, eps)).astype(np.float32)
+        coord_std = np.sqrt(coord_var)
+        
+        s_mean = s_sum / float(coord_count)
+        s_var = (s_sq_sum / float(coord_count)) - s_mean * s_mean
+        s_std = np.sqrt(s_var)
 
         stats_group = h5_file.create_group("stats")
         stats_group.create_dataset("u_mean", data=u_mean.astype(np.float32))
-        stats_group.create_dataset("u_std", data=u_std)
+        stats_group.create_dataset("u_std", data=u_std.astype(np.float32))
         stats_group.create_dataset("cv_mean", data=np.asarray(cv_mean, dtype=np.float32))
         stats_group.create_dataset("cv_std", data=np.asarray(cv_std, dtype=np.float32))
         stats_group.create_dataset("coord_mean", data=coord_mean.astype(np.float32))
-        stats_group.create_dataset("coord_std", data=coord_std)
+        stats_group.create_dataset("coord_std", data=coord_std.astype(np.float32))
+        stats_group.create_dataset("s_mean", data=np.asarray(s_mean, dtype=np.float32))
+        stats_group.create_dataset("s_std", data=np.asarray(s_std, dtype=np.float32))
         stats_group.attrs["u_count"] = int(n_samples)
         stats_group.attrs["coord_count"] = int(coord_count)
 

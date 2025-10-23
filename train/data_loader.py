@@ -30,13 +30,12 @@ class DeepONetPointDataset(Dataset):
             )
         self.u_mean = np.asarray(stats_group["u_mean"], dtype=np.float32)
         u_std = np.asarray(stats_group["u_std"], dtype=np.float32)
-        self.u_std = np.maximum(u_std, 1.0e-6)
         self.cv_mean = float(np.asarray(stats_group["cv_mean"], dtype=np.float32))
         cv_std = float(np.asarray(stats_group["cv_std"], dtype=np.float32))
-        self.cv_std = max(cv_std, 1.0e-6)
         self.coord_mean = np.asarray(stats_group["coord_mean"], dtype=np.float32)
         coord_std = np.asarray(stats_group["coord_std"], dtype=np.float32)
-        self.coord_std = np.maximum(coord_std, 1.0e-6)
+        self.s_mean = float(np.asarray(stats_group["s_mean"], dtype=np.float32))
+        s_std = float(np.asarray(stats_group["s_std"], dtype=np.float32))
 
         self.torch_dtype = getattr(torch, str(cfg["dtype"]))
         self.flatten_branch = bool(cfg["flatten_branch"])
@@ -70,12 +69,13 @@ class DeepONetPointDataset(Dataset):
 
         cv_norm = (cv_scalar - self.cv_mean) / self.cv_std
         coord_norm = (coord - self.coord_mean) / self.coord_std
+        s_norm = (target - self.s_mean) / self.s_std
 
         return {
             "u": torch.as_tensor(branch_input, dtype=self.torch_dtype),
             "cv": torch.as_tensor([cv_norm], dtype=self.torch_dtype),
             "coord": torch.as_tensor(coord_norm, dtype=self.torch_dtype),
-            "s": torch.as_tensor([target], dtype=self.torch_dtype),
+            "s": torch.as_tensor([s_norm], dtype=self.torch_dtype),
         }
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
