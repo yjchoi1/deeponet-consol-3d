@@ -9,11 +9,12 @@ sys.path.insert(0, str(project_root))
 
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Tuple
 
 import h5py
 import numpy as np
 import torch
+from scipy.stats import qmc
 
 from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm_batch
 
@@ -31,7 +32,6 @@ CONFIG: Dict[str, object] = {
     "nz": 41,
     "t_span": (0.0, 1.0),
     "n_time_points": 41,
-    "time_bias_exponent": 3.0,
     "cv_range": (0.2, 2.0),
     "gp_output_scale": 500.0,
     "gp_length_scale_xy": 0.15,
@@ -40,32 +40,6 @@ CONFIG: Dict[str, object] = {
     "seed": 42,
     "torch_dtype": "float32",
 }
-
-
-def biased_time_grid(
-    t_span: Tuple[float, float], n_times: int, exponent: float
-) -> np.ndarray:
-    """Return monotonically increasing time samples concentrated near t0.
-
-    Args:
-        t_span: Tuple ``(t_start, t_end)`` with ``t_end > t_start``.
-        n_times: Number of time samples (>= 2).
-        exponent: Power-law exponent controlling early-time oversampling.
-
-    Returns:
-        Array of shape ``(n_times,)`` with ``times[0] == t_start`` and
-        ``times[-1] == t_end``.
-    """
-    if n_times < 2:
-        raise ValueError("n_times must be at least 2.")
-    t_start, t_end = map(float, t_span)
-    if t_end <= t_start:
-        raise ValueError("t_span must satisfy t_end > t_start.")
-    ramp = np.linspace(0.0, 1.0, n_times, dtype=np.float64) ** float(exponent)
-    times = t_start + (t_end - t_start) * ramp
-    times[0] = t_start
-    times[-1] = t_end
-    return times
 
 
 def sample_solution_points(
@@ -77,89 +51,44 @@ def sample_solution_points(
     n_points: int,
     rng: np.random.Generator,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Sample solution values at random space-time points with boundary coverage.
+    """Sample grid points using Latin Hypercube Sampling (LHS).
 
     Args:
-        field: Solution array of shape ``(nt, nx, ny, nz)``.
-        times: Time coordinates of shape ``(nt,)``.
-        xs: X coordinates of shape ``(nx,)``.
-        ys: Y coordinates of shape ``(ny,)``.
-        zs: Z coordinates of shape ``(nz,)``.
+        field: Solution array of shape (nt, nx, ny, nz).
+        times: Time coordinates of shape (nt,).
+        xs: X coordinates of shape (nx,).
+        ys: Y coordinates of shape (ny,).
+        zs: Z coordinates of shape (nz,).
         n_points: Number of points to sample.
         rng: Random number generator.
 
     Returns:
-        Tuple ``(points, values)`` where ``points`` has shape ``(n_points, 4)``
-        containing ``(t, x, y, z)`` and ``values`` has shape ``(n_points,)``.
+        Tuple (points, values) where points has shape (n_points, 4)
+        containing (t, x, y, z) and values has shape (n_points,).
     """
     nt, nx, ny, nz = field.shape
 
-    def random_index(limit: int) -> int:
-        """Generate a random integer index in [0, limit) using the seeded `rng`."""
-        return int(rng.integers(0, limit))
+    sampler = qmc.LatinHypercube(d=4, seed=rng)
+    unit_samples = sampler.random(n_points)
 
-    selections: List[Tuple[int, int, int, int]] = []
-    seen = set()
+    ti = np.floor(unit_samples[:, 0] * nt).astype(int)
+    xi = np.floor(unit_samples[:, 1] * nx).astype(int)
+    yi = np.floor(unit_samples[:, 2] * ny).astype(int)
+    zi = np.floor(unit_samples[:, 3] * nz).astype(int)
 
-    # Helper to register unique index tuples so we avoid duplicates.
-    def add_index(ti: int, xi: int, yi: int, zi: int) -> None:
-        key = (ti, xi, yi, zi)
-        if key in seen:
-            return
-        seen.add(key)
-        selections.append(key)
+    # Ensure indices are within bounds due to possible 1.0 - eps rounding
+    ti = np.clip(ti, 0, nt - 1)
+    xi = np.clip(xi, 0, nx - 1)
+    yi = np.clip(yi, 0, ny - 1)
+    zi = np.clip(zi, 0, nz - 1)
 
-    boundary_time_indices = (0, nt - 1)
-    boundary_faces: Sequence[Tuple[str, Iterable[int]]] = (
-        ("x", (0, nx - 1)),
-        ("y", (0, ny - 1)),
-        ("z", (0, nz - 1)),
-    )
+    points = np.empty((n_points, 4), dtype=np.float32)
+    points[:, 0] = times[ti].astype(np.float32)
+    points[:, 1] = xs[xi].astype(np.float32)
+    points[:, 2] = ys[yi].astype(np.float32)
+    points[:, 3] = zs[zi].astype(np.float32)
 
-    # Sample early and late times to capture transient extremes.
-    # Keep the spatial sampling (don't focusing on edge indices)
-    for ti in boundary_time_indices:
-        add_index(
-            ti,
-            random_index(nx),
-            random_index(ny),
-            random_index(nz),
-        )
-
-    # Sample each spatial boundary face to anchor boundary behaviour.
-    for axis, boundary_indices in boundary_faces:
-        for idx in boundary_indices:
-            ti = random_index(nt)
-            if axis == "x":
-                add_index(ti, idx, random_index(ny), random_index(nz))
-            elif axis == "y":
-                add_index(ti, random_index(nx), idx, random_index(nz))
-            else:
-                add_index(ti, random_index(nx), random_index(ny), idx)
-
-    # Fill the remainder with random interior samples.
-    while len(selections) < n_points:
-        add_index(
-            random_index(nt),
-            random_index(nx),
-            random_index(ny),
-            random_index(nz),
-        )
-
-    selections = selections[:n_points]
-
-    points = np.empty((len(selections), 4), dtype=np.float32)
-    values = np.empty((len(selections),), dtype=np.float32)
-
-    # Convert sampled indices into physical coordinates and solution values.
-    for idx, (ti, xi, yi, zi) in enumerate(selections):
-        points[idx] = (
-            float(times[ti]),
-            float(xs[xi]),
-            float(ys[yi]),
-            float(zs[zi]),
-        )
-        values[idx] = float(field[ti, xi, yi, zi])
+    values = field[ti, xi, yi, zi].astype(np.float32)
 
     return points, values
 
@@ -185,7 +114,6 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
     nz = int(cfg["nz"])
     t_span = tuple(float(x) for x in cfg["t_span"])  # type: ignore[index]
     n_time_points = int(cfg["n_time_points"])
-    time_bias = float(cfg["time_bias_exponent"])
     cv_min, cv_max = (float(x) for x in cfg["cv_range"])  # type: ignore[index]
     gp_output_scale = float(cfg["gp_output_scale"])
     gp_length_scale_xy = float(cfg["gp_length_scale_xy"])
@@ -195,9 +123,22 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
     torch_dtype = getattr(torch, dtype_str)
     output_path = Path(cfg["output_path"])  # type: ignore[arg-type]
 
+    # Define random seed
     rng = np.random.default_rng(seed)
-    time_samples = biased_time_grid(t_span, n_time_points, time_bias)
-
+    
+    # Check input parameter sanity
+    if n_time_points < 2:
+        raise ValueError("n_time_points must be at least 2.")
+    if t_span[1] <= t_span[0]:
+        raise ValueError("t_span must satisfy t_end > t_start.")
+    
+    # Generate equally spaced t, x, y, z grids
+    time_samples = np.linspace(
+        t_span[0],
+        t_span[1],
+        n_time_points,
+        dtype=np.float64,
+    )
     x_range = tuple(float(v) for v in cfg["x_range"])  # type: ignore[index]
     y_range = tuple(float(v) for v in cfg["y_range"])  # type: ignore[index]
     z_range = tuple(float(v) for v in cfg["z_range"])  # type: ignore[index]
@@ -296,6 +237,7 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
             # times are shared across all samples in batch. This avoids creating a new time array for each sample.
             batch_times = solver_result["t"].cpu().numpy()
 
+            # For each u0-solution in the batch, sample points and values (so-called target) from the solution.
             for local_idx in range(current_batch):
                 sample_id = int(batch_indices[local_idx])
                 field = batch_fields[local_idx]
