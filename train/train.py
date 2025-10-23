@@ -107,6 +107,7 @@ def load_checkpoint(
     device: torch.device,
 ) -> Tuple[int, int]:
     checkpoint = torch.load(ckpt_path, map_location=device)
+    model.to(device)  
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     epoch = int(checkpoint.get("epoch", 0))
@@ -221,6 +222,7 @@ def main(cfg: DictConfig) -> None:
     model_config = OmegaConf.to_container(model_cfg, resolve=True)
     assert isinstance(model_config, dict)
     model = build_model(model_config)
+    model.to(device)  
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(train_cfg.learning_rate),
