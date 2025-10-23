@@ -61,26 +61,18 @@ class DeepONet3D(nn.Module):
         self.branch = BranchNet(**branch_config).to(dtype=dtype, device=device)
         self.trunk = TrunkNet(**trunk_config).to(dtype=dtype, device=device)
         self.bias = nn.Parameter(torch.zeros(1, dtype=dtype, device=device))
-
+        
         input_dim = 1 + 4  # Cv plus (t, x, y, z)
-        self.register_buffer(
-            "fourier_weight",
-            random_fourier_matrix(input_dim, ff_features, ff_sigma, device, dtype),
-            persistent=False,
-        )
-
-    def _random_features(self, trunk_input: torch.Tensor) -> torch.Tensor:
-        projection = trunk_input @ self.fourier_weight
-        sin_part = torch.sin(2.0 * math.pi * projection)
-        cos_part = torch.cos(2.0 * math.pi * projection)
-        return torch.cat([sin_part, cos_part], dim=-1)
+        B = torch.randn(input_dim, ff_features, dtype=dtype, device=device) * torch.tensor(ff_sigma, dtype=dtype, device=device)
+        self.B = nn.Parameter(B, requires_grad=False)
 
     def forward(self, u: torch.Tensor, cv: torch.Tensor, coord: torch.Tensor) -> torch.Tensor:
         trunk_input = torch.cat([cv, coord], dim=-1)
-        rff = self._random_features(trunk_input)
+        rff = torch.matmul(trunk_input, self.B)
+        rff_input = torch.cat((torch.sin(2 * torch.pi * rff), torch.cos(2 * torch.pi * rff)), dim=-1)
 
         branch_output = self.branch(u)
-        trunk_output = self.trunk(rff)
+        trunk_output = self.trunk(rff_input)
 
         combined = torch.sum(branch_output * trunk_output, dim=-1, keepdim=True)
         return combined + self.bias
