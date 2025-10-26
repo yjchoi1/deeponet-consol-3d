@@ -29,13 +29,13 @@ class DeepONetPointDataset(Dataset):
                 "Regenerate data with updated generator to include 'stats' group."
             )
         self.u_mean = np.asarray(stats_group["u_mean"], dtype=np.float32)
-        u_std = np.asarray(stats_group["u_std"], dtype=np.float32)
+        self.u_std = np.asarray(stats_group["u_std"], dtype=np.float32)
         self.cv_mean = float(np.asarray(stats_group["cv_mean"], dtype=np.float32))
-        cv_std = float(np.asarray(stats_group["cv_std"], dtype=np.float32))
+        self.cv_std = float(np.asarray(stats_group["cv_std"], dtype=np.float32))
         self.coord_mean = np.asarray(stats_group["coord_mean"], dtype=np.float32)
-        coord_std = np.asarray(stats_group["coord_std"], dtype=np.float32)
+        self.coord_std = np.asarray(stats_group["coord_std"], dtype=np.float32)
         self.s_mean = float(np.asarray(stats_group["s_mean"], dtype=np.float32))
-        s_std = float(np.asarray(stats_group["s_std"], dtype=np.float32))
+        self.s_std = float(np.asarray(stats_group["s_std"], dtype=np.float32))
 
         self.torch_dtype = getattr(torch, str(cfg["dtype"]))
         self.flatten_branch = bool(cfg["flatten_branch"])

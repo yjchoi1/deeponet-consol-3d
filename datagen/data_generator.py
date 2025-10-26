@@ -21,7 +21,7 @@ from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm
 
 # Configuration for dataset generation parameters and solver setup.
 CONFIG: Dict[str, object] = {
-    "n_samples": 100,
+    "n_samples": 20,
     "batch_size": 20,
     "points_per_sample": 8192,
     "x_range": (0.0, 1.0),
@@ -36,7 +36,7 @@ CONFIG: Dict[str, object] = {
     "gp_output_scale": 1000.0,
     "gp_length_scale_xy": 0.15,
     "u0_ranges": [(10_000.0, 20_000.0)],
-    "output_path": Path("train/data/deeponet_terzaghi_train.h5"),
+    "output_path": Path("train/data/deeponet_terzaghi_val.h5"),
     "seed": 42,
     "torch_dtype": "float32",
 }
