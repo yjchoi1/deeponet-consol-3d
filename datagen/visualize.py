@@ -19,13 +19,16 @@ from solver.solver_batch import solve_terzaghi_3d_fdm_batch
 
 
 CONFIG: Dict[str, object] = {
-    "dataset_path": Path("train/data/deeponet_terzaghi.h5"),
+    "dataset_path": Path("train/data/deeponet_terzaghi_train.h5"),
     "sample_index": 0,
-    "time_index": -1,
+    "time_index": 40,
     "volume_opacity": 0.12,
     "volume_surface_count": 18,
     "marker_size": 6,
     "colorscale": "Turbo",
+    # Fixed color range for all colorbars (set None to auto)
+    "color_min": 0,
+    "color_max": 20000,
 }
 
 
@@ -92,6 +95,7 @@ def build_figure(
     viz_cfg: Dict[str, object],
     sample_index: int,
     time_index: int,
+    cv_value: float,
 ) -> go.Figure:
     """Construct the Plotly figure with 2D surface, 3D volume, and sampled points."""
     x_coords = np.asarray(config["x_coords"], dtype=np.float32)
@@ -126,6 +130,11 @@ def build_figure(
     surface_count = int(viz_cfg.get("volume_surface_count", 18))
     marker_size = int(viz_cfg.get("marker_size", 6))
 
+    color_min_raw = viz_cfg.get("color_min")
+    color_max_raw = viz_cfg.get("color_max")
+    color_min = float(color_min_raw) if color_min_raw is not None else None
+    color_max = float(color_max_raw) if color_max_raw is not None else None
+
     fig = make_subplots(
         rows=1,
         cols=3,
@@ -137,33 +146,56 @@ def build_figure(
         ],
     )
 
+    heatmap_kwargs = dict(
+        x=x_coords,
+        y=y_coords,
+        z=u0.T,
+        colorscale=colorscale,
+        colorbar=dict(title="u₀"),
+    )
+    if color_min is not None:
+        heatmap_kwargs["zmin"] = color_min
+    if color_max is not None:
+        heatmap_kwargs["zmax"] = color_max
+
     fig.add_trace(
-        go.Heatmap(
-            x=x_coords,
-            y=y_coords,
-            z=u0.T,
-            colorscale=colorscale,
-            colorbar=dict(title="u₀"),
-        ),
+        go.Heatmap(**heatmap_kwargs),
         row=1,
         col=1,
     )
 
+    volume_kwargs = dict(
+        x=grid_x.ravel(),
+        y=grid_y.ravel(),
+        z=grid_z.ravel(),
+        value=field_at_time.ravel(),
+        opacity=volume_opacity,
+        surface_count=surface_count,
+        colorscale=colorscale,
+        colorbar=dict(title="PWP"),
+        caps=dict(x_show=False, y_show=False, z_show=False),
+    )
+    if color_min is not None:
+        volume_kwargs["cmin"] = color_min
+    if color_max is not None:
+        volume_kwargs["cmax"] = color_max
+
     fig.add_trace(
-        go.Volume(
-            x=grid_x.ravel(),
-            y=grid_y.ravel(),
-            z=grid_z.ravel(),
-            value=field_at_time.ravel(),
-            opacity=volume_opacity,
-            surface_count=surface_count,
-            colorscale=colorscale,
-            colorbar=dict(title="PWP"),
-            caps=dict(x_show=False, y_show=False, z_show=False),
-        ),
+        go.Volume(**volume_kwargs),
         row=1,
         col=2,
     )
+
+    marker_kwargs = dict(
+        color=values_at_time,
+        colorscale=colorscale,
+        size=marker_size,
+        colorbar=dict(title="Sampled PWP"),
+    )
+    if color_min is not None:
+        marker_kwargs["cmin"] = color_min
+    if color_max is not None:
+        marker_kwargs["cmax"] = color_max
 
     fig.add_trace(
         go.Scatter3d(
@@ -171,12 +203,7 @@ def build_figure(
             y=points_at_time[:, 2],
             z=points_at_time[:, 3],
             mode="markers",
-            marker=dict(
-                color=values_at_time,
-                colorscale=colorscale,
-                size=marker_size,
-                colorbar=dict(title="Sampled PWP"),
-            ),
+            marker=marker_kwargs,
         ),
         row=1,
         col=3,
@@ -186,7 +213,7 @@ def build_figure(
     fig.update_yaxes(title="y", row=1, col=1)
 
     fig.update_layout(
-        title=f"Sample {sample_index} at t = {time_value:.4f}",
+        title=f"Sample {sample_index} at t = {time_value:.4f}, Cv = {cv_value:.4f}",
         scene=dict(
             xaxis_title="x",
             yaxis_title="y",
@@ -220,7 +247,7 @@ def visualize_sample(cfg: Dict[str, object]) -> None:
     data_cfg.setdefault("nz", int(len(data_cfg["z_coords"])))
 
     full_field = compute_full_field(u0, cv_value, data_cfg)
-    fig = build_figure(u0, full_field, points, values, data_cfg, cfg, sample_index, time_index)
+    fig = build_figure(u0, full_field, points, values, data_cfg, cfg, sample_index, time_index, cv_value)
     fig.write_html(f"sample_{sample_index}_time_{time_index}.html")
 
 
