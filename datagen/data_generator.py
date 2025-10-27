@@ -279,8 +279,9 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
 
         u_sum_np = u_sum.cpu().numpy()
         u_sq_sum_np = u_sq_sum.cpu().numpy()
-        u_mean = float(u_sum_np.mean())
-        u_var = float(u_sq_sum_np.mean()) - u_mean * u_mean
+        total_count = n_samples * nx * ny
+        u_mean = float(u_sum_np.sum() / total_count)
+        u_var = float(u_sq_sum_np.sum() / total_count) - u_mean * u_mean
         u_std = float(np.sqrt(u_var))
 
         cv_mean = cv_sum / float(n_samples)
