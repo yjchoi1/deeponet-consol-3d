@@ -279,9 +279,9 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
 
         u_sum_np = u_sum.cpu().numpy()
         u_sq_sum_np = u_sq_sum.cpu().numpy()
-        u_mean = u_sum_np / float(n_samples)
-        u_var = (u_sq_sum_np / float(n_samples)) - np.square(u_mean)
-        u_std = np.sqrt(u_var)
+        u_mean = float(u_sum_np.mean())
+        u_var = float(u_sq_sum_np.mean()) - u_mean * u_mean
+        u_std = float(np.sqrt(u_var))
 
         cv_mean = cv_sum / float(n_samples)
         cv_var = (cv_sq_sum / float(n_samples)) - cv_mean * cv_mean
@@ -296,8 +296,8 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
         s_std = np.sqrt(s_var)
 
         stats_group = h5_file.create_group("stats")
-        stats_group.create_dataset("u_mean", data=u_mean.astype(np.float32))
-        stats_group.create_dataset("u_std", data=u_std.astype(np.float32))
+        stats_group.create_dataset("u_mean", data=np.asarray(u_mean, dtype=np.float32))
+        stats_group.create_dataset("u_std", data=np.asarray(u_std, dtype=np.float32))
         stats_group.create_dataset("cv_mean", data=np.asarray(cv_mean, dtype=np.float32))
         stats_group.create_dataset("cv_std", data=np.asarray(cv_std, dtype=np.float32))
         stats_group.create_dataset("coord_mean", data=coord_mean.astype(np.float32))

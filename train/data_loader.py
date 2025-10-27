@@ -28,8 +28,8 @@ class DeepONetPointDataset(Dataset):
                 "Normalization statistics not found in dataset. "
                 "Regenerate data with updated generator to include 'stats' group."
             )
-        self.u_mean = np.asarray(stats_group["u_mean"], dtype=np.float32)
-        self.u_std = np.asarray(stats_group["u_std"], dtype=np.float32)
+        self.u_mean = float(np.asarray(stats_group["u_mean"], dtype=np.float32))
+        self.u_std = float(np.asarray(stats_group["u_std"], dtype=np.float32))
         self.cv_mean = float(np.asarray(stats_group["cv_mean"], dtype=np.float32))
         self.cv_std = float(np.asarray(stats_group["cv_std"], dtype=np.float32))
         self.coord_mean = np.asarray(stats_group["coord_mean"], dtype=np.float32)
