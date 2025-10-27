@@ -9,7 +9,7 @@ hydra:
 
 data:
   batch_size: 2048
-  num_workers: 0
+  num_workers: 4
   pin_memory: true
   flatten_branch: true
   dtype: float32
@@ -25,8 +25,10 @@ data:
     drop_last: false
 
 model:
+  use_conv_branch: false      # true for Conv2d branch (requires flatten_branch=false)
+  use_fourier_features: true  # false to disable Fourier features
   branch:
-    input_dim: 1681  # 41 * 41
+    input_dim: 2601  # 51 * 51 (ignored if use_conv_branch=true)
     hidden_dim: 256
     output_dim: 128
     num_blocks: 3
@@ -44,10 +46,10 @@ training:
   epochs: 50
   learning_rate: 0.0001
   weight_decay: 0.0001
-  checkpoint_dir: train/checkpoints
+  checkpoint_dir: train/checkpoint
   log_dir: train/runs/deeponet
-  resume: true
-  print_every: 50
+  resume: false
+  print_every: 2
   checkpoint_interval: 1
   grad_clip_norm: null
   device: cuda

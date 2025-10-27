@@ -7,16 +7,21 @@ import torch
 import torch.nn as nn
 
 
-def random_fourier_matrix(
-    in_features: int,
-    out_features: int,
-    sigma: float,
-    device: torch.device,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    scale = math.sqrt(2.0) * float(sigma)
-    matrix = torch.randn(in_features, out_features, device=device, dtype=dtype)
-    return matrix * scale
+class ResidualBlock(nn.Module):
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.linear1 = nn.Linear(dim, dim)
+        self.linear2 = nn.Linear(dim, dim)
+        self.activation = nn.ReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        out = self.linear1(x)
+        out = self.activation(out)
+        out = self.linear2(out)
+        out += residual
+        out = self.activation(out)
+        return out
 
 
 class BranchNet(nn.Module):
@@ -47,7 +52,7 @@ class TrunkNet(nn.Module):
         return self.final(x)
 
 
-class DeepONet3D(nn.Module):
+class DeepONetResNet3D(nn.Module):
     def __init__(
         self,
         branch_config: Dict[str, int],
@@ -56,61 +61,57 @@ class DeepONet3D(nn.Module):
         ff_features: int,
         device: torch.device,
         dtype: torch.dtype,
+        use_fourier: bool = True,
     ) -> None:
         super().__init__()
+        self.use_fourier = use_fourier
         self.branch = BranchNet(**branch_config).to(dtype=dtype, device=device)
         self.trunk = TrunkNet(**trunk_config).to(dtype=dtype, device=device)
         self.bias = nn.Parameter(torch.zeros(1, dtype=dtype, device=device))
         
-        input_dim = 1 + 4  # Cv plus (t, x, y, z)
-        B = torch.randn(input_dim, ff_features, dtype=dtype, device=device) * torch.tensor(ff_sigma, dtype=dtype, device=device)
-        self.B = nn.Parameter(B, requires_grad=False)
+        if use_fourier:
+            input_dim = 1 + 4  # Cv plus (t, x, y, z)
+            B = torch.randn(input_dim, ff_features, dtype=dtype, device=device) * torch.tensor(ff_sigma, dtype=dtype, device=device)
+            self.B = nn.Parameter(B, requires_grad=False)
 
     def forward(self, u: torch.Tensor, cv: torch.Tensor, coord: torch.Tensor) -> torch.Tensor:
         trunk_input = torch.cat([cv, coord], dim=-1)
-        rff = torch.matmul(trunk_input, self.B)
-        rff_input = torch.cat((torch.sin(2 * torch.pi * rff), torch.cos(2 * torch.pi * rff)), dim=-1)
+        
+        if self.use_fourier:
+            rff = torch.matmul(trunk_input, self.B)
+            rff_input = torch.cat((torch.sin(2 * torch.pi * rff), torch.cos(2 * torch.pi * rff)), dim=-1)
+            trunk_output = self.trunk(rff_input)
+        else:
+            trunk_output = self.trunk(trunk_input)
 
         branch_output = self.branch(u)
-        trunk_output = self.trunk(rff_input)
-
         combined = torch.sum(branch_output * trunk_output, dim=-1, keepdim=True)
         return combined + self.bias
 
 
-def build_model(cfg: Mapping[str, object]) -> DeepONet3D:
+def build_resnet_model(cfg: Mapping[str, object]) -> DeepONetResNet3D:
     branch_cfg = dict(cfg["branch"])  # type: ignore[arg-type]
     trunk_cfg = dict(cfg["trunk"])  # type: ignore[arg-type]
     ff_sigma = float(cfg["ff_sigma"])
     ff_features = int(cfg["ff_features"])
     device = torch.device(cfg["device"])  # type: ignore[arg-type]
     dtype = getattr(torch, str(cfg["dtype"]))
+    use_fourier = bool(cfg.get("use_fourier_features", True))
 
-    # Trunk expects twice the random feature dimension after sin/cos concatenation.
-    trunk_cfg["input_dim"] = ff_features * 2
+    if use_fourier:
+        # Trunk expects twice the random feature dimension after sin/cos concatenation.
+        trunk_cfg["input_dim"] = ff_features * 2
+    else:
+        # Trunk receives cv + coord directly
+        trunk_cfg["input_dim"] = 1 + 4  # Cv plus (t, x, y, z)
 
-    return DeepONet3D(
+    return DeepONetResNet3D(
         branch_config=branch_cfg,
         trunk_config=trunk_cfg,
         ff_sigma=ff_sigma,
         ff_features=ff_features,
         device=device,
         dtype=dtype,
+        use_fourier=use_fourier,
     )
 
-
-class ResidualBlock(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.linear1 = nn.Linear(dim, dim)
-        self.linear2 = nn.Linear(dim, dim)
-        self.activation = nn.ReLU()
-
-    def forward(self, x):
-        residual = x
-        out = self.linear1(x)
-        out = self.activation(out)
-        out = self.linear2(out)
-        out += residual
-        out = self.activation(out)
-        return out

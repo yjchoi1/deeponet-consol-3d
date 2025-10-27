@@ -14,7 +14,7 @@ import torch
 from omegaconf import OmegaConf
 
 from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm_batch
-from train.deeponet import build_model
+from train.models import build_model
 
 # ============================================================================
 # HARDCODED EVALUATION CONFIGURATION

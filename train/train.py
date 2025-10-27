@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from data_loader import DeepONetPointDataset
-from deeponet import build_model
+from models import build_model
 
 
 def build_dataloaders(cfg: DictConfig) -> Tuple[DataLoader, DataLoader]:
