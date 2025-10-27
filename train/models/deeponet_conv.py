@@ -41,7 +41,8 @@ class ConvBranchNet(nn.Module):
         # After conv3+pool3: (batch, 128, 6, 6)
         # Flattened: batch, 128*6*6 = 4608
         self.flatten_dim = 128 * 6 * 6
-        self.fc = nn.Linear(self.flatten_dim, output_dim)
+        self.fc1 = nn.Linear(self.flatten_dim, 512)
+        self.fc2 = nn.Linear(512, output_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ensure input has correct shape: (batch, 1, 51, 51)
@@ -56,7 +57,8 @@ class ConvBranchNet(nn.Module):
         x = self.pool3(x)
         
         x = x.view(x.size(0), -1)  # Flatten
-        x = self.fc(x)
+        x = self.activation(self.fc1(x))
+        x = self.fc2(x)
         return x
 
 
