@@ -79,6 +79,15 @@ def get_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
     )
 
 
+def save_config(ckpt_dir: Path, cfg: object) -> None:
+    """Save training configuration to checkpoint directory."""
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    config_path = ckpt_dir / "config.yaml"
+    with open(config_path, "w") as f:
+        OmegaConf.save(cfg, f)
+    print(f"Configuration saved to: {config_path}")
+
+
 def save_checkpoint(
     ckpt_dir: Path,
     epoch: int,
@@ -233,6 +242,9 @@ def main(cfg: DictConfig) -> None:
     log_dir = Path(train_cfg.log_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
+    
+    save_config(ckpt_dir, cfg_export)
+    
     writer = SummaryWriter(log_dir=log_dir)
 
     start_epoch = 0
