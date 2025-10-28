@@ -2,6 +2,16 @@
 
 This document explains how to select and configure different DeepONet architectures via the config.yaml file.
 
+## Quick Reference
+
+| Model | use_conv_branch | use_fourier_features | use_vanilla_branch | flatten_branch |
+|-------|-----------------|---------------------|-------------------|----------------|
+| **ResNet + FF** (default) | false | true | false | true |
+| **Conv2d + FF** | true | true | - | false |
+| **Conv2d + No FF** | true | false | - | false |
+| **Vanilla + FF** | false | true | true | true |
+| **Vanilla** | false | false | true | true |
+
 ## Available Models
 
 ### 1. ResNet Branch + Fourier Features (Default)
@@ -11,6 +21,7 @@ This document explains how to select and configure different DeepONet architectu
 model:
   use_conv_branch: false
   use_fourier_features: true
+  use_vanilla_branch: false
   branch:
     input_dim: 2601  # 51 * 51
     hidden_dim: 256
@@ -50,13 +61,32 @@ data:
   flatten_branch: false  # Must be false for Conv2d
 ```
 
-### 4. Vanilla DeepONet
+### 4. Vanilla MLP + Fourier Features
+**Simple MLP networks without residual blocks, WITH Fourier features**
+
+```yaml
+model:
+  use_conv_branch: false
+  use_fourier_features: true
+  use_vanilla_branch: true
+  branch:
+    input_dim: 2601
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3  # Becomes num_layers in vanilla
+
+data:
+  flatten_branch: true  # Must be true for vanilla
+```
+
+### 5. Vanilla MLP (No Fourier Features)
 **Simple MLP networks without residual blocks or Fourier features**
 
 ```yaml
 model:
   use_conv_branch: false
   use_fourier_features: false
+  use_vanilla_branch: true
   branch:
     input_dim: 2601
     hidden_dim: 256
@@ -101,11 +131,20 @@ data:
    - For flatten_branch=true: input is (batch, 2601)
    - For flatten_branch=false: input is (batch, 51, 51) → reshaped to (batch, 1, 51, 51) in Conv model
 
-3. **Backward Compatibility**:
+3. **Model Selection Flags**:
+   - `use_conv_branch`: If true, uses Conv2d branch; if false, uses MLP branch
+   - `use_fourier_features`: If true, applies Fourier features to trunk input
+   - `use_vanilla_branch`: If true, uses simple MLP (no residual blocks); if false, uses ResNet MLP
+   - Default behavior (all flags unset): ResNet + Fourier Features
+
+4. **Backward Compatibility**:
+   - Old configs WITHOUT `use_vanilla_branch` flag will default to `false` (ResNet branch)
+   - Old configs with `use_conv_branch=false, use_fourier_features=false` will still load Vanilla model
    - Old checkpoints from train/deeponet.py are NOT compatible
    - Retrain models with the new architecture
 
-4. **Evaluation**:
+5. **Evaluation**:
    - The evaluate.py script automatically uses the model type from the training config
    - No changes needed to evaluation code when switching models
+   - Saved config.yaml in checkpoint directory shows exact model configuration used
 

@@ -26,11 +26,11 @@ def create_dummy_batch(batch_size: int, flatten_branch: bool):
     return u, cv, coord, target
 
 
-def test_model(model_name: str, use_conv: bool, use_ff: bool, num_steps: int = 5):
+def test_model_variant(model_name: str, use_conv: bool, use_ff: bool, use_vanilla: bool, num_steps: int = 5):
     """Test a model variant for a few training steps."""
     print(f"\n{'='*60}")
     print(f"Testing: {model_name}")
-    print(f"  use_conv_branch={use_conv}, use_fourier_features={use_ff}")
+    print(f"  use_conv_branch={use_conv}, use_fourier_features={use_ff}, use_vanilla_branch={use_vanilla}")
     print(f"{'='*60}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,6 +40,7 @@ def test_model(model_name: str, use_conv: bool, use_ff: bool, num_steps: int = 5
     config = {
         "use_conv_branch": use_conv,
         "use_fourier_features": use_ff,
+        "use_vanilla_branch": use_vanilla,
         "branch": {
             "input_dim": 2601,
             "hidden_dim": 128,
@@ -130,15 +131,16 @@ def main():
     print("="*60)
     
     test_configs = [
-        ("ResNet + Fourier Features", False, True),
-        ("Conv2d + Fourier Features", True, True),
-        ("Conv2d + No Fourier Features", True, False),
-        ("Vanilla (No ResNet, No FF)", False, False),
+        ("ResNet + Fourier Features", False, True, False),
+        ("Conv2d + Fourier Features", True, True, False),
+        ("Conv2d + No Fourier Features", True, False, False),
+        ("Vanilla + Fourier Features", False, True, True),
+        ("Vanilla (No FF)", False, False, True),
     ]
     
     results = {}
-    for name, use_conv, use_ff in test_configs:
-        success = test_model(name, use_conv, use_ff, num_steps=5)
+    for name, use_conv, use_ff, use_vanilla in test_configs:
+        success = test_model_variant(name, use_conv, use_ff, use_vanilla, num_steps=5)
         results[name] = success
     
     # Summary
