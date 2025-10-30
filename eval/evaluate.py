@@ -21,8 +21,8 @@ from train.models import build_model
 # ============================================================================
 EVAL_CONFIG = {
     # Model and checkpoint paths
-    "train_config_path": "train/conf/config.yaml",
-    "checkpoint_path": "train/checkpoints/latest.pt",
+    "train_config_path": "train/model/case3_vanilla_scaling/config.yaml",
+    "checkpoint_path": "train/model/case3_vanilla_scaling/latest.pt",
     "normalization_data_path": "train/data/deeponet_terzaghi_val.h5",
     
     # Grid parameters (should match training data generation)
@@ -271,16 +271,17 @@ def main():
         gp_params=cfg["gp_params"],
         u0_ranges=cfg["u0_ranges"],
         seed=cfg["seed"],
-        device=torch.device("cpu"),
+        device=device,
         dtype=torch.float32,
     )
     u0_batch = enforce_drained_dirichlet_bc(u0_batch)
-    u0 = u0_batch[0].numpy()
+    u0 = u0_batch[0].cpu().numpy()
     print(f"    Generated initial condition: shape={u0.shape}, mean={u0.mean():.2f}, std={u0.std():.2f}")
     print(f"    Cv value: {cv_value}")
     
     # Run solver
     print("\n[6] Running solver...")
+    print(f"    Using device: {device}")
     eval_times = cfg["eval_times"]
     solver_result = solve_terzaghi_3d_fdm_batch(
         Cv_batch=[cv_value],
@@ -294,9 +295,9 @@ def main():
         u0_xy_batch=u0_batch,
         t_eval=eval_times,
         dtype=torch.float32,
-        device="cpu",
+        device=device,
     )
-    solver_u = solver_result["u"].squeeze(0).numpy()  # Remove batch dimension
+    solver_u = solver_result["u"].squeeze(0).cpu().numpy()  # Remove batch dimension and move to CPU
     print(f"    Solver complete: solution shape={solver_u.shape}")
     
     # Create query points
@@ -308,6 +309,7 @@ def main():
     
     # Evaluate DeepONet
     print("\n[8] Evaluating DeepONet...")
+    print(f"    Using device: {device}")
     predictions = evaluate_deeponet(
         model, u0, cv_value, all_coords, stats, device, 
         batch_size=cfg["batch_size"],
