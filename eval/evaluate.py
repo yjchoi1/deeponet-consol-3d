@@ -21,20 +21,20 @@ from train.models import build_model
 # ============================================================================
 EVAL_CONFIG = {
     # Model and checkpoint paths
-    "train_config_path": "train/model/case3_vanilla_scaling/config.yaml",
-    "checkpoint_path": "train/model/case3_vanilla_scaling/latest.pt",
+    "train_config_path": "train/model/cose3_vanilla_ff/config.yaml",
+    "checkpoint_path": "train/model/cose3_vanilla_ff/latest.pt",
     "normalization_data_path": "train/data/deeponet_terzaghi_val.h5",
     
     # Grid parameters (should match training data generation)
-    "nx": 41,
-    "ny": 41,
-    "nz": 41,
+    "nx": 51,
+    "ny": 51,
+    "nz": 51,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
     
     # Time points to evaluate
-    "eval_times": [0.2, 0.5, 1.0],
+    "eval_times": [0.0, 0.1, 0.5],
     "t_span": (0.0, 1.0),
     
     # Test sample parameters
@@ -48,7 +48,8 @@ EVAL_CONFIG = {
     
     # Visualization parameters
     "y_threshold": 0.5,  # Show points where y < y_threshold
-    "output_figure": "eval/comparison.png",
+    "output_figure": "eval/case3_vanilla_ff/comparison.png",
+    "u0_colorbar_limits": [15000.0, 20000.0],
     
     # Inference parameters
     "batch_size": 10000,  # For batched inference
@@ -144,73 +145,181 @@ def evaluate_deeponet(model, u0, cv, coords, stats, device, batch_size, flatten_
     return predictions
 
 
-def plot_comparison(u0, pred_fields, true_fields, eval_times, xs, ys, zs, y_threshold, output_path):
-    """Create 4-subplot comparison figure with 2D initial field and 3D scatter plots."""
+def plot_comparison(
+    u0,
+    pred_fields,
+    true_fields,
+    eval_times,
+    xs,
+    ys,
+    zs,
+    y_threshold,
+    output_path,
+    u0_color_limits=None,
+):
+    """Create comparison figure with initial field and 3D scatter plots."""
     n_times = len(eval_times)
-    fig = plt.figure(figsize=(16, 4 * n_times))
-    
+    total_rows = n_times + 1
+    total_cols = 3
+    fig = plt.figure(figsize=(12, 3 * total_rows))
+
+    pred_stack = np.stack(pred_fields, axis=0)
+    true_stack = np.stack(true_fields, axis=0)
+    error_stack = np.abs(pred_stack - true_stack)
+
+    sol_vmin = min(pred_stack.min(), true_stack.min())
+    sol_vmax = max(pred_stack.max(), true_stack.max())
+    err_vmin = error_stack.min()
+    err_vmax = error_stack.max()
+
+    if u0_color_limits is not None:
+        u0_vmin, u0_vmax = u0_color_limits
+    else:
+        u0_vmin = u0.min()
+        u0_vmax = u0.max()
+
+    X, Y, Z = np.meshgrid(xs, ys, zs, indexing='ij')
+    mask = Y >= y_threshold
+    if not np.any(mask):
+        raise ValueError("Mask for y >= y_threshold produced no points to plot.")
+
+    x_plot = X[mask]
+    y_plot = Y[mask]
+    z_plot = Z[mask]
+
+    # Centered initial condition on first row
+    left_ax = fig.add_subplot(total_rows, total_cols, 1)
+    left_ax.axis('off')
+    ax_u0 = fig.add_subplot(total_rows, total_cols, 2)
+    right_ax = fig.add_subplot(total_rows, total_cols, 3)
+    right_ax.axis('off')
+
+    im1 = ax_u0.imshow(
+        u0.T,
+        origin='lower',
+        extent=[xs[0], xs[-1], ys[0], ys[-1]],
+        cmap='viridis',
+        aspect='equal',
+        vmin=u0_vmin,
+        vmax=u0_vmax,
+    )
+    ax_u0.set_xlabel('X')
+    ax_u0.set_ylabel('Y')
+    ax_u0.set_title('Initial Excess PWP (Pa)')
+    plt.colorbar(im1, ax=ax_u0, extend='both')
+
     for time_idx, t in enumerate(eval_times):
-        # Extract field at this time
         pred = pred_fields[time_idx]
         true = true_fields[time_idx]
         error = np.abs(pred - true)
-        
-        # Create mask for y < y_threshold
-        X, Y, Z = np.meshgrid(xs, ys, zs, indexing='ij')
-        mask = Y < y_threshold
-        
-        # Flatten and filter
-        x_plot = X[mask]
-        y_plot = Y[mask]
-        z_plot = Z[mask]
+
         pred_plot = pred[mask]
         true_plot = true[mask]
         error_plot = error[mask]
-        
-        # Determine color limits
-        vmin = min(pred_plot.min(), true_plot.min())
-        vmax = max(pred_plot.max(), true_plot.max())
-        
-        base_idx = time_idx * 4
-        
-        # Subplot 1: Initial condition (2D heatmap)
-        ax1 = fig.add_subplot(n_times, 4, base_idx + 1)
-        im1 = ax1.imshow(u0.T, origin='lower', extent=[xs[0], xs[-1], ys[0], ys[-1]], 
-                         cmap='viridis', aspect='auto')
-        ax1.set_xlabel('X')
-        ax1.set_ylabel('Y')
-        ax1.set_title(f't={t:.2f}: Initial u0 (x-y surface)')
-        plt.colorbar(im1, ax=ax1, label='PWP')
-        
-        # Subplot 2: DeepONet prediction (3D scatter)
-        ax2 = fig.add_subplot(n_times, 4, base_idx + 2, projection='3d')
-        sc2 = ax2.scatter(x_plot, z_plot, y_plot, c=pred_plot, cmap='viridis', 
-                         s=1, vmin=vmin, vmax=vmax)
+
+        pred_min = float(pred_plot.min())
+        pred_max = float(pred_plot.max())
+        true_min = float(true_plot.min())
+        true_max = float(true_plot.max())
+        err_min = float(error_plot.min())
+        err_max = float(error_plot.max())
+
+        if pred_min == pred_max:
+            pred_max = pred_min + 1e-6
+        if true_min == true_max:
+            true_max = true_min + 1e-6
+        if err_min == err_max:
+            err_max = err_min + 1e-6
+
+        base_idx = 3 * (time_idx + 1) + 1
+
+        ax2 = fig.add_subplot(total_rows, total_cols, base_idx, projection='3d')
+        sc2 = ax2.scatter(
+            x_plot,
+            y_plot,
+            z_plot,
+            c=pred_plot,
+            cmap='viridis',
+            s=1,
+            vmin=sol_vmin,
+            vmax=sol_vmax,
+        )
         ax2.set_xlabel('X')
-        ax2.set_ylabel('Z')
-        ax2.set_zlabel('Y')
-        ax2.set_title(f't={t:.2f}: DeepONet Prediction')
-        plt.colorbar(sc2, ax=ax2, label='PWP', shrink=0.5)
-        
-        # Subplot 3: Solver solution (3D scatter)
-        ax3 = fig.add_subplot(n_times, 4, base_idx + 3, projection='3d')
-        sc3 = ax3.scatter(x_plot, z_plot, y_plot, c=true_plot, cmap='viridis', 
-                         s=1, vmin=vmin, vmax=vmax)
+        ax2.set_ylabel('Y')
+        ax2.set_zlabel('Z')
+        ax2.set_title(f't={t:.2f}: Prediction (Pa)')
+        ax2.set_xlim(xs[0], xs[-1])
+        ax2.set_ylim(ys[0], ys[-1])
+        ax2.set_zlim(zs[0], zs[-1])
+        cbar2 = plt.colorbar(
+            sc2,
+            ax=ax2,
+            shrink=0.5,
+            pad=0.2,
+            extend='both',
+            boundaries=np.linspace(pred_min, pred_max, 256),
+        )
+        cbar2.locator = plt.MaxNLocator(4)
+        cbar2.update_ticks()
+
+        ax3 = fig.add_subplot(total_rows, total_cols, base_idx + 1, projection='3d')
+        sc3 = ax3.scatter(
+            x_plot,
+            y_plot,
+            z_plot,
+            c=true_plot,
+            cmap='viridis',
+            s=1,
+            vmin=sol_vmin,
+            vmax=sol_vmax,
+        )
         ax3.set_xlabel('X')
-        ax3.set_ylabel('Z')
-        ax3.set_zlabel('Y')
-        ax3.set_title(f't={t:.2f}: Solver Solution')
-        plt.colorbar(sc3, ax=ax3, label='PWP', shrink=0.5)
-        
-        # Subplot 4: Error (3D scatter)
-        ax4 = fig.add_subplot(n_times, 4, base_idx + 4, projection='3d')
-        sc4 = ax4.scatter(x_plot, z_plot, y_plot, c=error_plot, cmap='Reds', s=1)
+        ax3.set_ylabel('Y')
+        ax3.set_zlabel('Z')
+        ax3.set_title(f't={t:.2f}: True Solution (Pa)')
+        ax3.set_xlim(xs[0], xs[-1])
+        ax3.set_ylim(ys[0], ys[-1])
+        ax3.set_zlim(zs[0], zs[-1])
+        cbar3 = plt.colorbar(
+            sc3,
+            ax=ax3,
+            shrink=0.5,
+            pad=0.2,
+            extend='both',
+            boundaries=np.linspace(true_min, true_max, 256),
+        )
+        cbar3.locator = plt.MaxNLocator(4)
+        cbar3.update_ticks()
+
+        ax4 = fig.add_subplot(total_rows, total_cols, base_idx + 2, projection='3d')
+        sc4 = ax4.scatter(
+            x_plot,
+            y_plot,
+            z_plot,
+            c=error_plot,
+            cmap='Reds',
+            s=1,
+            vmin=err_vmin,
+            vmax=err_vmax,
+        )
         ax4.set_xlabel('X')
-        ax4.set_ylabel('Z')
-        ax4.set_zlabel('Y')
-        ax4.set_title(f't={t:.2f}: Absolute Error')
-        plt.colorbar(sc4, ax=ax4, label='|Error|', shrink=0.5)
-    
+        ax4.set_ylabel('Y')
+        ax4.set_zlabel('Z')
+        ax4.set_title(f't={t:.2f}: Absolute Error (Pa)')
+        ax4.set_xlim(xs[0], xs[-1])
+        ax4.set_ylim(ys[0], ys[-1])
+        ax4.set_zlim(zs[0], zs[-1])
+        cbar4 = plt.colorbar(
+            sc4,
+            ax=ax4,
+            shrink=0.5,
+            pad=0.2,
+            extend='both',
+            boundaries=np.linspace(err_min, err_max, 256),
+        )
+        cbar4.locator = plt.MaxNLocator(4)
+        cbar4.update_ticks()
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"Figure saved to {output_path}")
@@ -348,7 +457,8 @@ def main():
     
     plot_comparison(
         u0, pred_fields, true_fields, eval_times, 
-        xs, ys, zs, cfg["y_threshold"], output_path
+        xs, ys, zs, cfg["y_threshold"], output_path,
+        u0_color_limits=cfg.get("u0_colorbar_limits"),
     )
     
     print("\n" + "=" * 80)
