@@ -94,6 +94,7 @@ def solve_terzaghi_3d_fdm(
     t_eval: Optional[np.ndarray] = None,
     rtol: float = 1e-6,
     atol: float = 1e-9,
+    method: str = "RK45",
 ):
     """
     Solve Terzaghi's 3D consolidation PDE using finite differences in space
@@ -111,6 +112,7 @@ def solve_terzaghi_3d_fdm(
     - u0_xy: array of shape (nx, ny) for initial surface replicated across depth
     - t_eval: times at which to store the computed solution; defaults to 50 linspace samples
     - rtol, atol: tolerances for solve_ivp
+    - method: integration method for solve_ivp (e.g., 'RK45', 'BDF')
 
     Returns
     - result: dict with keys
@@ -154,11 +156,13 @@ def solve_terzaghi_3d_fdm(
         return _flatten(dUdt)
 
     # Solve
+    integration_method = method.upper()
+
     sol = solve_ivp(
         rhs,
         t_span=t_span,
         y0=_flatten(U0),
-        method="RK45",
+        method=integration_method,
         t_eval=np.asarray(t_eval, dtype=float),
         rtol=rtol,
         atol=atol,
