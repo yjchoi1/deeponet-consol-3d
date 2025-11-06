@@ -11,6 +11,7 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
+import pandas as pd
 
 from uq.simulate_uq_consolidation import UQ_CONFIG, CASE
 
@@ -59,26 +60,25 @@ def summarize_and_visualize(
     if save_csv:
         # Per-sample metrics
         sample_csv_path = out_dir / "sample_results.csv"
-        with sample_csv_path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["sample", "Cv", "t50", "Tv50"]) 
-            for i in range(Cv_all.shape[0]):
-                writer.writerow([i, f"{Cv_all[i]:.8g}", f"{t50_all[i]:.8g}", f"{Tv50_all[i]:.8g}"])
+        df_samples = pd.DataFrame({
+            "sample": np.arange(Cv_all.shape[0]),
+            "Cv": Cv_all,
+            "t50": t50_all,
+            "Tv50": Tv50_all,
+        })
+        df_samples.to_csv(sample_csv_path, index=False)
 
         # Time-series summary
         summary_csv_path = out_dir / "summary_stats.csv"
-        with summary_csv_path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["t", "Uv_mean", "Uv_std", "Uv_p05", "Uv_p50", "Uv_p95"])
-            for i, t in enumerate(eval_times):
-                writer.writerow([
-                    f"{float(t):.8g}",
-                    f"{Uv_mean[i]:.8g}",
-                    f"{Uv_std[i]:.8g}",
-                    f"{Uv_p05[i]:.8g}",
-                    f"{Uv_p50[i]:.8g}",
-                    f"{Uv_p95[i]:.8g}",
-                ])
+        df_summary = pd.DataFrame({
+            "t": eval_times.astype(float),
+            "Uv_mean": Uv_mean,
+            "Uv_std": Uv_std,
+            "Uv_p05": Uv_p05,
+            "Uv_p50": Uv_p50,
+            "Uv_p95": Uv_p95,
+        })
+        df_summary.to_csv(summary_csv_path, index=False)
 
     if make_plots:
         # Plot U_v mean and 2-sigma band
