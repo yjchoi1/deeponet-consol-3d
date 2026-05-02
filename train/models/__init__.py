@@ -20,6 +20,7 @@ def build_model(cfg: Mapping[str, object]) -> nn.Module:
     use_conv = bool(cfg.get("use_conv_branch", False))
     use_ff = bool(cfg.get("use_fourier_features", True))
     use_vanilla = bool(cfg.get("use_vanilla_branch", False))
+    use_fourier_features_scaling = bool(cfg.get("use_fourier_features_scaling"))
     
     if use_conv and use_ff:
         from .deeponet_conv import build_conv_model
@@ -27,7 +28,7 @@ def build_model(cfg: Mapping[str, object]) -> nn.Module:
     elif use_conv and not use_ff:
         from .deeponet_conv import build_conv_model
         return build_conv_model(cfg, use_fourier=False)
-    elif use_vanilla and use_ff:
+    elif use_vanilla and use_ff and not use_fourier_features_scaling:
         # Vanilla MLP branch + Fourier features trunk
         from .deeponet_vanilla_ff import build_vanilla_ff_model
         return build_vanilla_ff_model(cfg)
@@ -35,6 +36,10 @@ def build_model(cfg: Mapping[str, object]) -> nn.Module:
         # Vanilla MLP branch + trunk (no Fourier features) - for backward compatibility
         from .deeponet_vanilla import build_vanilla_model
         return build_vanilla_model(cfg)
+    # Temporary model
+    elif use_fourier_features_scaling and use_fourier_features_scaling is not None:
+        from .deeponet_vanilla_ff_scaling import build_vanilla_ff_scaling_model
+        return build_vanilla_ff_scaling_model(cfg)
     else:  # ResNet + FF (default)
         from .deeponet_resnet import build_resnet_model
         return build_resnet_model(cfg)

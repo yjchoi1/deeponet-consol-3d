@@ -1,3 +1,4 @@
+# Configuration for ResNet DeepONet with Fourier Features (default model)
 defaults:
   - _self_
 
@@ -11,7 +12,7 @@ data:
   batch_size: 2048
   num_workers: 4
   pin_memory: true
-  flatten_branch: true
+  flatten_branch: true  # ResNet uses flattened branch input
   dtype: float32
   train:
     data_path: data/train.h5
@@ -25,20 +26,20 @@ data:
     drop_last: false
 
 model:
-  use_conv_branch: false      # true for Conv2d branch (requires flatten_branch=false)
-  use_fourier_features: true  # false to disable Fourier features
+  use_conv_branch: false      # No conv branch (use ResNet MLP)
+  use_fourier_features: true  # Use Fourier features in trunk
   branch:
-    input_dim: 2601  # 51 * 51 (ignored if use_conv_branch=true)
+    input_dim: 2601  # 51 * 51 (flattened)
     hidden_dim: 256
     output_dim: 128
-    num_blocks: 3
+    num_blocks: 3  # Number of residual blocks
   trunk:
-    input_dim: 256
+    input_dim: 256  # Will be overridden: ff_features * 2 (sin+cos)
     hidden_dim: 256
     output_dim: 128
-    num_blocks: 3
-  ff_features: 128
-  ff_sigma: 1.0
+    num_blocks: 3  # Number of residual blocks
+  ff_features: 128  # Fourier feature dimension
+  ff_sigma: 1.0     # Fourier feature scale
   dtype: float32
   device: ${training.device}
 
@@ -46,8 +47,8 @@ training:
   epochs: 50
   learning_rate: 0.0001
   weight_decay: 0.0001
-  checkpoint_dir: train/checkpoint
-  log_dir: train/runs/deeponet
+  checkpoint_dir: train/checkpoint/resnet
+  log_dir: train/runs/resnet
   resume: false
   print_every: 2
   checkpoint_interval: 1
@@ -55,3 +56,4 @@ training:
   device: cuda
   log_every_steps: 10
   verbose: false
+

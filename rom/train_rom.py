@@ -1,3 +1,4 @@
+"""Training script for the ROM coefficient regressor."""
 from __future__ import annotations
 
 import sys
@@ -11,60 +12,65 @@ from omegaconf import DictConfig, OmegaConf
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from train.data_loader import DeepONetPointDataset
-from train.models import build_model
+from rom.data_loader_rom import ROMDataset
+from rom.model_rom import build_rom_model
+
+
+# ---------------------------------------------------------------------------
+# Data loaders
+# ---------------------------------------------------------------------------
 
 
 def build_dataloaders(cfg: DictConfig) -> Tuple[DataLoader, DataLoader]:
     data_cfg = cfg.data
-    batch_size = int(data_cfg.batch_size)
 
-    shared_dataset_options = {
-        "flatten_branch": bool(data_cfg.flatten_branch),
+    # Determine train/val split by sample index.
+    basis = np.load(Path(data_cfg.basis_path))
+    n_samples_total = int(basis["n_samples"])
+    n_train = int(n_samples_total * float(data_cfg.train_ratio))
+
+    rng = np.random.default_rng(int(data_cfg.seed))
+    perm = rng.permutation(n_samples_total)
+    train_indices = perm[:n_train].tolist()
+    val_indices = perm[n_train:].tolist()
+
+    shared_opts = {
+        "fields_path": str(data_cfg.fields_path),
+        "basis_path": str(data_cfg.basis_path),
         "dtype": str(data_cfg.dtype),
     }
 
-    train_seed = data_cfg.train.seed
-    train_dataset = DeepONetPointDataset(
-        {
-            **shared_dataset_options,
-            "data_path": Path(data_cfg.train.data_path),
-            "seed": None if train_seed is None else int(train_seed),
-        }
-    )
+    train_dataset = ROMDataset({**shared_opts, "sample_indices": train_indices})
+    val_dataset = ROMDataset({**shared_opts, "sample_indices": val_indices})
 
-    val_seed = data_cfg.val.seed
-    val_dataset = DeepONetPointDataset(
-        {
-            **shared_dataset_options,
-            "data_path": Path(data_cfg.val.data_path),
-            "seed": None if val_seed is None else int(val_seed),
-        }
-    )
-
+    batch_size = int(data_cfg.batch_size)
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=bool(data_cfg.train.shuffle),
+        shuffle=bool(data_cfg.shuffle_train),
         num_workers=int(data_cfg.num_workers),
         pin_memory=bool(data_cfg.pin_memory),
-        drop_last=bool(data_cfg.train.drop_last),
+        drop_last=False,
     )
-
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
-        shuffle=bool(data_cfg.val.shuffle),
+        shuffle=False,
         num_workers=int(data_cfg.num_workers),
         pin_memory=bool(data_cfg.pin_memory),
-        drop_last=bool(data_cfg.val.drop_last),
+        drop_last=False,
     )
-
     return train_loader, val_loader
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint helpers (same pattern as train/train.py)
+# ---------------------------------------------------------------------------
 
 
 def get_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
@@ -73,19 +79,7 @@ def get_latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
     checkpoints = list(ckpt_dir.glob("checkpoint_epoch_*.pt"))
     if not checkpoints:
         return None
-    return max(
-        checkpoints,
-        key=lambda path: int(path.stem.split("_")[-1]),
-    )
-
-
-def save_config(ckpt_dir: Path, cfg: object) -> None:
-    """Save training configuration to checkpoint directory."""
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    config_path = ckpt_dir / "config.yaml"
-    with open(config_path, "w") as f:
-        OmegaConf.save(cfg, f)
-    print(f"Configuration saved to: {config_path}")
+    return max(checkpoints, key=lambda p: int(p.stem.split("_")[-1]))
 
 
 def save_checkpoint(
@@ -104,8 +98,7 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "config": cfg,
     }
-    ckpt_path = ckpt_dir / f"checkpoint_epoch_{epoch:04d}.pt"
-    torch.save(state, ckpt_path)
+    torch.save(state, ckpt_dir / f"checkpoint_epoch_{epoch:04d}.pt")
     torch.save(state, ckpt_dir / "latest.pt")
 
 
@@ -116,12 +109,17 @@ def load_checkpoint(
     device: torch.device,
 ) -> Tuple[int, int]:
     checkpoint = torch.load(ckpt_path, map_location=device)
-    model.to(device)  
+    model.to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     epoch = int(checkpoint.get("epoch", 0))
     global_step = int(checkpoint.get("global_step", epoch))
     return epoch, global_step
+
+
+# ---------------------------------------------------------------------------
+# Train / eval loops
+# ---------------------------------------------------------------------------
 
 
 def train_one_epoch(
@@ -143,13 +141,13 @@ def train_one_epoch(
     steps = 0
 
     for batch_idx, batch in enumerate(loader):
-        u = batch["u"].to(device)
+        u0 = batch["u0"].to(device)
         cv = batch["cv"].to(device)
-        coord = batch["coord"].to(device)
-        target = batch["s"].to(device)
+        t = batch["t"].to(device)
+        target = batch["coeffs"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
-        output = model(u, cv, coord)
+        output = model(u0, cv, t)
         loss = criterion(output, target)
         loss.backward()
 
@@ -167,10 +165,7 @@ def train_one_epoch(
             global_step = global_step_offset + batch_idx
             writer.add_scalar("loss/train_step", float(loss.item()), global_step)
             if verbose:
-                print(
-                    f"  Step {batch_idx + 1:05d} "
-                    f"loss={loss.item():.6f}"
-                )
+                print(f"  Step {batch_idx + 1:05d} loss={loss.item():.6f}")
 
     avg_loss = running_loss / max(1, total_samples)
     return avg_loss, total_samples, steps
@@ -188,12 +183,12 @@ def evaluate(
     total_samples = 0
 
     for batch in loader:
-        u = batch["u"].to(device)
+        u0 = batch["u0"].to(device)
         cv = batch["cv"].to(device)
-        coord = batch["coord"].to(device)
-        target = batch["s"].to(device)
+        t = batch["t"].to(device)
+        target = batch["coeffs"].to(device)
 
-        output = model(u, cv, coord)
+        output = model(u0, cv, t)
         loss = criterion(output, target)
 
         batch_size = target.shape[0]
@@ -204,9 +199,14 @@ def evaluate(
     return avg_loss, total_samples
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    print("Running with configuration:\n" + OmegaConf.to_yaml(cfg))
+    print("Running ROM training with configuration:\n" + OmegaConf.to_yaml(cfg))
 
     cfg_export = OmegaConf.to_container(cfg, resolve=True)
     assert isinstance(cfg_export, dict)
@@ -217,21 +217,25 @@ def main(cfg: DictConfig) -> None:
 
     device = torch.device(train_cfg.device)
 
-    print("Building data loaders...")
+    # Build data loaders.
+    print("Building data loaders ...")
     train_loader, val_loader = build_dataloaders(cfg)
     print(
-        "  Train dataset size: "
-        f"{len(train_loader.dataset)} samples ({len(train_loader)} batches)"
+        f"  Train: {len(train_loader.dataset)} samples ({len(train_loader)} batches)"
     )
-    print(
-        "  Validation dataset size: "
-        f"{len(val_loader.dataset)} samples ({len(val_loader)} batches)"
-    )
+    print(f"  Val:   {len(val_loader.dataset)} samples ({len(val_loader)} batches)")
 
+    # Infer u0_dim from the first dataset sample.
+    sample = train_loader.dataset[0]
+    u0_dim = int(sample["u0"].shape[0])
+
+    # Build model.
     model_config = OmegaConf.to_container(model_cfg, resolve=True)
     assert isinstance(model_config, dict)
-    model = build_model(model_config)
-    model.to(device)  
+    model_config["u0_dim"] = u0_dim
+    model = build_rom_model(model_config)
+    model.to(device)
+
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(train_cfg.learning_rate),
@@ -242,9 +246,13 @@ def main(cfg: DictConfig) -> None:
     log_dir = Path(train_cfg.log_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-    
-    save_config(ckpt_dir, cfg_export)
-    
+
+    # Save config.
+    config_path = ckpt_dir / "config.yaml"
+    with open(config_path, "w") as f:
+        OmegaConf.save(cfg_export, f)
+    print(f"Configuration saved to: {config_path}")
+
     writer = SummaryWriter(log_dir=log_dir)
 
     start_epoch = 0
@@ -253,7 +261,9 @@ def main(cfg: DictConfig) -> None:
         latest_ckpt = get_latest_checkpoint(ckpt_dir)
         if latest_ckpt:
             print(f"Resuming from checkpoint: {latest_ckpt.name}")
-            start_epoch, global_step = load_checkpoint(latest_ckpt, model, optimizer, device)
+            start_epoch, global_step = load_checkpoint(
+                latest_ckpt, model, optimizer, device
+            )
             print(f"  Loaded epoch {start_epoch} with global_step {global_step}.")
             start_epoch += 1
         else:
@@ -265,11 +275,16 @@ def main(cfg: DictConfig) -> None:
     print_every = int(train_cfg.print_every)
     checkpoint_interval = int(train_cfg.checkpoint_interval)
     grad_clip_norm_cfg = train_cfg.grad_clip_norm
-    grad_clip_norm = float(grad_clip_norm_cfg) if grad_clip_norm_cfg is not None else None
+    grad_clip_norm = (
+        float(grad_clip_norm_cfg) if grad_clip_norm_cfg is not None else None
+    )
 
     history = []
 
-    print(f"Starting training for {epochs - start_epoch} epochs (from epoch {start_epoch + 1}).")
+    print(
+        f"Starting training for {epochs - start_epoch} epochs "
+        f"(from epoch {start_epoch + 1})."
+    )
 
     for epoch in range(start_epoch, epochs):
         train_loss, train_samples, steps = train_one_epoch(
@@ -289,8 +304,6 @@ def main(cfg: DictConfig) -> None:
 
         writer.add_scalar("loss/train", train_loss, epoch)
         writer.add_scalar("loss/val", val_loss, epoch)
-        writer.add_scalar("samples/train", train_samples, epoch)
-        writer.add_scalar("samples/val", val_samples, epoch)
 
         if ((epoch + 1) % checkpoint_interval == 0) or ((epoch + 1) == epochs):
             save_checkpoint(ckpt_dir, epoch, model, optimizer, cfg_export, global_step)
@@ -306,8 +319,8 @@ def main(cfg: DictConfig) -> None:
     print("Training complete.")
     print("Epoch\tTrainLoss\tValLoss")
     for entry in history:
-        epoch_idx, train_loss, val_loss = entry
-        print(f"{epoch_idx:04d}\t{train_loss:.6f}\t{val_loss:.6f}")
+        epoch_idx, tl, vl = entry
+        print(f"{epoch_idx:04d}\t{tl:.6f}\t{vl:.6f}")
 
     writer.close()
 

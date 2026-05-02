@@ -3,6 +3,7 @@ from typing import Tuple, List, Optional, Sequence
 from scipy.integrate import solve_ivp
 import random as _random
 import gstools as gs
+import time
 
 
 def random_gaussian_pwp(
@@ -94,6 +95,7 @@ def solve_terzaghi_3d_fdm(
     t_eval: Optional[np.ndarray] = None,
     rtol: float = 1e-6,
     atol: float = 1e-9,
+    method: str = "RK45",
 ):
     """
     Solve Terzaghi's 3D consolidation PDE using finite differences in space
@@ -111,6 +113,7 @@ def solve_terzaghi_3d_fdm(
     - u0_xy: array of shape (nx, ny) for initial surface replicated across depth
     - t_eval: times at which to store the computed solution; defaults to 50 linspace samples
     - rtol, atol: tolerances for solve_ivp
+    - method: integration method for solve_ivp (e.g., 'RK45', 'BDF')
 
     Returns
     - result: dict with keys
@@ -154,11 +157,13 @@ def solve_terzaghi_3d_fdm(
         return _flatten(dUdt)
 
     # Solve
+    integration_method = method.upper()
+
     sol = solve_ivp(
         rhs,
         t_span=t_span,
         y0=_flatten(U0),
-        method="RK45",
+        method=integration_method,
         t_eval=np.asarray(t_eval, dtype=float),
         rtol=rtol,
         atol=atol,
@@ -181,3 +186,58 @@ def solve_terzaghi_3d_fdm(
         "dy": dy,
         "dz": dz,
     }
+
+
+if __name__ == "__main__":
+    # Hard-coded test inputs
+    test_params = {
+        "Cv": 1.0,
+        "x_range": (0.0, 1.0),
+        "y_range": (0.0, 1.0),
+        "z_range": (0.0, 1.0),
+        "nx": 51,
+        "ny": 51,
+        "nz": 51,
+        "t_span": (0.0, 0.20),
+        "rtol": 1e-6,
+        "atol": 1e-9,
+        "method": "RK45",
+    }
+
+    # Generate a simple test initial condition (Gaussian surface)
+    nx = test_params["nx"]
+    ny = test_params["ny"]
+    x = np.linspace(test_params["x_range"][0], test_params["x_range"][1], nx)
+    y = np.linspace(test_params["y_range"][0], test_params["y_range"][1], ny)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    # Simple Gaussian initial condition
+    u0_xy = 10.0 * np.exp(-((X - 5.0) ** 2 + (Y - 5.0) ** 2) / 4.0)
+
+    print("Testing Terzaghi 3D FDM solver...")
+    print(f"Grid size: {nx} x {ny} x {test_params['nz']}")
+    print(f"Time span: {test_params['t_span']}")
+    print(f"Consolidation coefficient Cv: {test_params['Cv']}")
+
+    # Measure execution time
+    start_time = time.time()
+    result = solve_terzaghi_3d_fdm(
+        Cv=test_params["Cv"],
+        x_range=test_params["x_range"],
+        y_range=test_params["y_range"],
+        z_range=test_params["z_range"],
+        nx=test_params["nx"],
+        ny=test_params["ny"],
+        nz=test_params["nz"],
+        t_span=test_params["t_span"],
+        u0_xy=u0_xy,
+        method=test_params["method"],
+    )
+    elapsed_time = time.time() - start_time
+
+    print(f"\nSolver completed successfully!")
+    print(f"Execution time: {elapsed_time:.4f} seconds")
+    print(f"Solution shape: {result['u'].shape}")
+    print(f"Number of time steps: {len(result['t'])}")
+    print(f"Grid spacings: dx={result['dx']:.4f}, dy={result['dy']:.4f}, dz={result['dz']:.4f}")
+    print(f"Initial u range: [{result['u'][0].min():.4f}, {result['u'][0].max():.4f}]")
+    print(f"Final u range: [{result['u'][-1].min():.4f}, {result['u'][-1].max():.4f}]")

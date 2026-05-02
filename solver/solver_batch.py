@@ -9,6 +9,14 @@ import torch
 
 TensorLike = Union[torch.Tensor, np.ndarray, Sequence[float]]
 
+# Boundary condition modes for u (excess pore water pressure).
+#
+# - "drained": Dirichlet u=0 on all six faces (current behavior).
+# - "drained_xy_top_nodrain_bottom": Dirichlet on x/y faces and top z face, and
+#   no-drain (Neumann du/dz=0) on the bottom z face.
+BC_DRAINED = "drained"
+BC_DRAINED_XY_TOP_NODRAIN_BOTTOM = "drained_xy_top_nodrain_bottom"
+
 
 def random_gaussian_pwp_batch(
     n_samples: int,
@@ -58,15 +66,52 @@ def _apply_drained_dirichlet_bc_(U: torch.Tensor) -> None:
     U[..., :, :, -1] = 0.0
 
 
+def _apply_drained_xy_top_nodrain_bottom_bc_(U: torch.Tensor) -> None:
+    """
+    In-place mixed BC:
+      - drained on x faces and y faces: u=0
+      - drained on top z face: u=0
+      - no-drain on bottom z face: du/dz = 0  -> u[:,:,z0] = u[:,:,z1]
+
+    We apply the Neumann condition only on interior x/y indices so that drained
+    edges/corners remain exactly zero.
+    """
+    # Drained on x/y faces (all z)
+    U[..., 0, :, :] = 0.0
+    U[..., -1, :, :] = 0.0
+    U[..., :, 0, :] = 0.0
+    U[..., :, -1, :] = 0.0
+
+    # Drained on top z face
+    U[..., :, :, -1] = 0.0
+
+    # No-drain on bottom z face (interior x/y only)
+    if U.shape[-1] < 2:
+        raise ValueError("nz must be at least 2 to apply bottom no-drain BC.")
+    U[..., 1:-1, 1:-1, 0] = U[..., 1:-1, 1:-1, 1]
+
+
+def _apply_bc_(U: torch.Tensor, bc: str) -> None:
+    if bc == BC_DRAINED:
+        _apply_drained_dirichlet_bc_(U)
+        return
+    if bc == BC_DRAINED_XY_TOP_NODRAIN_BOTTOM:
+        _apply_drained_xy_top_nodrain_bottom_bc_(U)
+        return
+    raise ValueError(
+        f"Unsupported bc='{bc}'. Use '{BC_DRAINED}' or '{BC_DRAINED_XY_TOP_NODRAIN_BOTTOM}'."
+    )
+
+
 def build_initial_field_from_surfaces(
-    u0_batch: torch.Tensor, nx: int, ny: int, nz: int
+    u0_batch: torch.Tensor, nx: int, ny: int, nz: int, *, bc: str = BC_DRAINED
 ) -> torch.Tensor:
-    """Broadcast horizontal surfaces (batch, nx, ny) into 3D grids with drained BC."""
+    """Broadcast horizontal surfaces (batch, nx, ny) into 3D grids and apply BC."""
     if u0_batch.ndim != 3 or u0_batch.shape[1:] != (nx, ny):
         raise ValueError(f"u0_batch must have shape (batch, {nx}, {ny})")
 
     field = u0_batch[:, :, :, None].expand(-1, -1, -1, nz).contiguous().clone()
-    _apply_drained_dirichlet_bc_(field)
+    _apply_bc_(field, bc)
     return field
 
 
@@ -82,6 +127,7 @@ def solve_terzaghi_3d_fdm_batch(
     u0_xy_batch: TensorLike,
     t_eval: Optional[TensorLike] = None,
     *,
+    bc: str = BC_DRAINED,
     dtype: torch.dtype = torch.float32,
     device: Union[str, torch.device] = "cuda",
     dt: Optional[float] = None,
@@ -125,7 +171,7 @@ def solve_terzaghi_3d_fdm_batch(
         raise ValueError(f"u0_xy_batch must have shape (batch, {nx}, {ny})")
     batch = int(u0_tensor.shape[0])
 
-    U = build_initial_field_from_surfaces(u0_tensor, nx, ny, nz)
+    U = build_initial_field_from_surfaces(u0_tensor, nx, ny, nz, bc=bc)
 
     Cv_tensor = torch.as_tensor(Cv_batch, dtype=dtype, device=device).view(-1)
     if Cv_tensor.shape[0] != batch:
@@ -160,12 +206,12 @@ def solve_terzaghi_3d_fdm_batch(
                     + (U[:, 1:-1, 1:-1, 2:] - 2.0 * core + U[:, 1:-1, 1:-1, :-2]) * inv_dz2
                 )
                 core.add_(sub_dt * Cv_tensor.view(batch, 1, 1, 1) * lap)
-                _apply_drained_dirichlet_bc_(U)
+                _apply_bc_(U, bc)
 
             sols[:, idx] = U
             current_time = target_time
 
-    _apply_drained_dirichlet_bc_(sols)
+    _apply_bc_(sols, bc)
 
     # Simple NaN check on the final solution tensor
     if torch.isnan(sols).any():
