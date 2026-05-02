@@ -20,28 +20,38 @@ from train.models import build_model
 # ============================================================================
 # HARDCODED EVALUATION CONFIGURATION
 # ============================================================================
+
+# For data_v2
+case = "case3_data_v2_vanilla_ff_scaling"
 EVAL_CONFIG = {
-    "train_config_path": "train/model/case3_vanilla_ff/config.yaml",
-    "checkpoint_path": "train/model/case3_vanilla_ff/latest.pt",
-    "normalization_data_path": "train/data/deeponet_terzaghi_train.h5",
+    # Model and checkpoint paths
+    "train_config_path": f"train/model/{case}/config.yaml",
+    "checkpoint_path": f"train/model/{case}/latest.pt",
+    "normalization_data_path": "data/train.h5",
+    # Boundary condition for u used by the reference solver (ground truth generation).
+    # Options:
+    #   - "drained": Dirichlet u=0 on all six faces (fully drained)
+    #   - "drained_xy_top_nodrain_bottom": Drained on x/y faces and top z face,
+    #     no-drain (Neumann du/dz=0) on bottom z face
+    "bc": "drained",
     "nx": 51,
     "ny": 51,
     "nz": 51,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
-    "eval_times": [0.0, 0.1, 0.3, 0.7, 1.5],
-    "t_span": (0.0, 1.0),
-    "cv_value": 0.1,
+    "eval_times": [0.0, 0.01, 0.05, 0.10, 0.20],
+    "t_span": (0.0, 0.20),
+    "cv_value": 0.5,
     "gp_params": {
         "output_scale": 1000.0,
-        "length_scales": 0.15,
+        "length_scales": 0.30,
     },
     "u0_ranges": [(10000.0, 20000.0)],
     "seed": 999,
     "batch_size": 10000,
     "line_plot": {
-        "output_figure": "eval/case3_vanilla_ff/line_comparison.png",
+        "output_figure": f"eval/{case}/line_comparison.png",
         "axes": {
             "x": {"fixed_y": 0.5, "fixed_z": 0.5},
             "y": {"fixed_x": 0.5, "fixed_z": 0.5},
@@ -49,6 +59,37 @@ EVAL_CONFIG = {
         },
     },
 }
+
+# For data_v1
+# EVAL_CONFIG = {
+#     "train_config_path": "train/model/cose3_vanilla_ff/config.yaml",
+#     "checkpoint_path": "train/model/cose3_vanilla_ff/latest.pt",
+#     "normalization_data_path": "train/data/deeponet_terzaghi_val.h5",
+#     "nx": 51,
+#     "ny": 51,
+#     "nz": 51,
+#     "x_range": (0.0, 1.0),
+#     "y_range": (0.0, 1.0),
+#     "z_range": (0.0, 1.0),
+#     "eval_times": [0.0, 0.1, 0.3, 0.7, 1.5],
+#     "t_span": (0.0, 1.0),
+#     "cv_value": 0.10,
+#     "gp_params": {
+#         "output_scale": 1000.0,
+#         "length_scales": 0.15,
+#     },
+#     "u0_ranges": [(10000.0, 20000.0)],
+#     "seed": 999,
+#     "batch_size": 10000,
+#     "line_plot": {
+#         "output_figure": "eval/case3_vanilla_ff/line_comparison.png",
+#         "axes": {
+#             "x": {"fixed_y": 0.5, "fixed_z": 0.5},
+#             "y": {"fixed_x": 0.5, "fixed_z": 0.5},
+#             "z": {"fixed_x": 0.5, "fixed_y": 0.5},
+#         },
+#     },
+# }
 
 
 H_DR = 0.5
@@ -147,7 +188,7 @@ def plot_line_comparison(
     coords_norm = {"x": xs / H_DR, "y": ys / H_DR, "z": zs / H_DR}
 
     fig, axes = plt.subplots(
-        1, len(axis_order), figsize=(5 * len(axis_order), 4), sharey=True
+        1, len(axis_order), figsize=(4 * len(axis_order), 3.5), sharey=True
     )
     if len(axis_order) == 1:
         axes = [axes]
@@ -178,7 +219,7 @@ def plot_line_comparison(
 
         for time_idx, t in enumerate(eval_times):
             color = colors[time_idx]
-            tv = (cv_value * t) / H_DR
+            tv = (cv_value * t) / H_DR**2
 
             if axis_name == "x":
                 pred_line = pred_fields[time_idx][:, iy, iz]
@@ -194,15 +235,16 @@ def plot_line_comparison(
                 coord,
                 pred_line,
                 color=color,
-                linestyle="-",
-                label=f"DeepONet (Tv={tv:.2f})",
+                linestyle="--",
+                label=f"T_v={tv:.2f} (Pred)",
             )
             axis.plot(
                 coord,
                 true_line,
                 color=color,
-                linestyle="--",
-                label=f"Solver (Tv={tv:.2f})",
+                linestyle="-",
+                alpha=0.7,
+                label=f"T_v={tv:.2f} (True)",
             )
 
         axis.set_xlabel(coord_label)
@@ -223,12 +265,26 @@ def plot_line_comparison(
 
     axes[0].set_ylabel("Excess PWP (Pa)")
 
-    # Consolidate legends into the last axis to avoid duplicates across subplots
-    handles, labels = axes[-1].get_legend_handles_labels()
-    dedup = dict(zip(labels, handles))
-    axes[-1].legend(dedup.values(), dedup.keys(), fontsize=9, frameon=False)
+    # Collect handles and labels from all axes, deduplicate
+    all_handles, all_labels = [], []
+    for ax in axes:
+        handles, labels = ax.get_legend_handles_labels()
+        all_handles.extend(handles)
+        all_labels.extend(labels)
+    
+    dedup = dict(zip(all_labels, all_handles))
+    
+    # Place legend outside the plots on the right side, adjacent to the plots
+    fig.legend(
+        dedup.values(),
+        dedup.keys(),
+        loc='center left',
+        bbox_to_anchor=(0.90, 0.5),
+        fontsize=9,
+        frameon=False
+    )
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.90, 1])
 
     output_path = Path(line_cfg["output_figure"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,6 +321,7 @@ def main():
     nx, ny, nz = cfg["nx"], cfg["ny"], cfg["nz"]
     x_range, y_range, z_range = cfg["x_range"], cfg["y_range"], cfg["z_range"]
     cv_value = cfg["cv_value"]
+    bc = str(cfg.get("bc", "drained"))
 
     u0_batch = random_gaussian_pwp_batch(
         n_samples=1,
@@ -294,6 +351,7 @@ def main():
         t_span=cfg["t_span"],
         u0_xy_batch=u0_batch,
         t_eval=eval_times,
+        bc=bc,
         dtype=torch.float32,
         device=device,
     )

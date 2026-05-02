@@ -88,22 +88,23 @@ def summarize_and_visualize(
         lower = Uv_mean - 2.0 * Uv_std
         upper = Uv_mean + 2.0 * Uv_std
         ax.fill_between(eval_times, lower, upper, color="C0", alpha=0.15, label="mean ± 2σ")
-        ax.set_xlabel("t")
-        ax.set_ylabel("U_v(t)")
+        ax.set_xlabel("t (years)")
+        ax.set_ylabel("U(t)")
+        ax.set_xlim(cfg['t_span'][0], cfg['t_span'][1])
         ax.set_ylim(0.0, 1.0)
         ax.grid(True, ls=":", alpha=0.5)
         ax.legend()
         fig.tight_layout()
-        fig.savefig(out_dir / "Uv_percentiles.png", dpi=300)
+        fig.savefig(out_dir / "U_percentiles.png", dpi=300)
         plt.close(fig)
 
         # Histogram of Tv50
         fig, ax = plt.subplots(figsize=(5, 3.5))
         valid = np.isfinite(Tv50_all)
         ax.hist(Tv50_all[valid], bins=30, color="C2", alpha=0.8)
-        ax.set_xlabel("Tv_50")
+        ax.set_xlabel(r"$T_{v, 50}$")
         ax.set_ylabel("Count")
-        ax.set_title("Distribution of Tv_50")
+        ax.set_title(r"Distribution of $T_{v, 50}$")
         ax.grid(True, ls=":", alpha=0.5)
         fig.tight_layout()
         fig.savefig(out_dir / "Tv50_hist.png", dpi=300)

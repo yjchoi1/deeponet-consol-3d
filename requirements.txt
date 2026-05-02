@@ -1,0 +1,13 @@
+torch
+numpy
+h5py
+hydra-core
+omegaconf
+matplotlib
+scipy
+scikit-learn
+gstools
+plotly
+pandas
+Pillow
+tensorboard

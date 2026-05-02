@@ -21,9 +21,9 @@ from solver.solver_batch import random_gaussian_pwp_batch, solve_terzaghi_3d_fdm
 
 # Configuration for dataset generation parameters and solver setup.
 CONFIG: Dict[str, object] = {
-    "n_samples": 20,
-    "batch_size": 20,
-    "points_per_sample": 8192,
+    "n_samples": 150,
+    "batch_size": 150,
+    "points_per_sample": 10000,
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
@@ -32,11 +32,16 @@ CONFIG: Dict[str, object] = {
     "nz": 51,
     "t_span": (0.0, 1.0),
     "n_time_points": 51,
-    "cv_range": (0.02, 0.1),
+    "cv_range": (0.1, 0.1),
     "gp_output_scale": 1000.0,
-    "gp_length_scale_xy": 0.15,
+    "gp_length_scale_xy": 0.3,
     "u0_ranges": [(10_000.0, 20_000.0)],
-    "output_path": Path("train/data/deeponet_terzaghi_val.h5"),
+    # Boundary condition for u (excess PWP) used by the solver.
+    # Options:
+    # - "drained" (default): u=0 on all faces
+    # - "drained_xy_top_nodrain_bottom": u=0 on x/y faces and top z; du/dz=0 at bottom z
+    "bc": "drained_xy_top_nodrain_bottom",
+    "output_path": Path("data/train.h5"),
     "seed": 42,
     "torch_dtype": "float32",
 }
@@ -118,6 +123,7 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
     gp_output_scale = float(cfg["gp_output_scale"])
     gp_length_scale_xy = float(cfg["gp_length_scale_xy"])
     u0_ranges = tuple(tuple(float(v) for v in pair) for pair in cfg["u0_ranges"])  # type: ignore[index]
+    bc = str(cfg.get("bc", "drained"))
     seed = int(cfg["seed"])
     dtype_str = str(cfg["torch_dtype"])
     torch_dtype = getattr(torch, dtype_str)
@@ -229,6 +235,7 @@ def generate_training_data(cfg: Dict[str, object]) -> None:
                 t_span=t_span,
                 u0_xy_batch=u0_batch,
                 t_eval=time_samples,
+                bc=bc,
                 dtype=torch_dtype,
             )
 

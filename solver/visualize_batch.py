@@ -11,6 +11,9 @@ CONFIG = {
     "x_range": (0.0, 1.0),
     "y_range": (0.0, 1.0),
     "z_range": (0.0, 1.0),
+    # Boundary condition for u used by the solver.
+    # Options: "drained", "drained_xy_top_nodrain_bottom"
+    "bc": "drained",
     "nx": 41,
     "ny": 41,
     "nz": 41,
@@ -68,6 +71,7 @@ def main() -> None:
         t_span=cfg["t_span"],
         u0_xy_batch=u0_xy_batch,
         t_eval=t_eval,
+        bc=str(cfg.get("bc", "drained")),
     )
 
     times = result["t"].cpu().numpy()

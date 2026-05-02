@@ -1,0 +1,62 @@
+# Configuration for Vanilla DeepONet with Fourier Features
+# Simple MLP branch and trunk WITH Fourier feature encoding
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: false
+
+data:
+  batch_size: 2048
+  num_workers: 4
+  pin_memory: true
+  flatten_branch: true  # Vanilla requires flattened branch input
+  dtype: float32
+  train:
+    data_path: data/train.h5
+    seed: 42
+    shuffle: false
+    drop_last: false
+  val:
+    data_path: data/val.h5
+    seed: 43
+    shuffle: false
+    drop_last: false
+
+model:
+  use_conv_branch: false      # No conv branch (use MLP)
+  use_fourier_features: true  # WITH Fourier features
+  use_vanilla_branch: true    # Use simple MLP (no residual blocks)
+  branch:
+    input_dim: 2601  # 51 * 51 (flattened)
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3  # Used as num_layers in vanilla
+  trunk:
+    input_dim: 256  # Will be overridden: ff_features * 2 (after sin/cos)
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3  # Used as num_layers in vanilla
+  ff_features: 128  # Fourier feature dimension
+  ff_sigma: 1.0     # Fourier feature scale
+  dtype: float32
+  device: ${training.device}
+
+training:
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  checkpoint_dir: train/checkpoint/vanilla_ff
+  log_dir: train/runs/vanilla_ff
+  resume: false
+  print_every: 2
+  checkpoint_interval: 1
+  grad_clip_norm: null
+  device: cuda
+  log_every_steps: 10
+  verbose: false
+
+

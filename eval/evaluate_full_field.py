@@ -20,12 +20,20 @@ from train.models import build_model
 # ============================================================================
 # HARDCODED EVALUATION CONFIGURATION
 # ============================================================================
-case = "case3_vanilla_ff"
+
+# For data_v2
+case = "case3_data_v2_vanilla_ff_scaling"
 EVAL_CONFIG = {
     # Model and checkpoint paths
     "train_config_path": f"train/model/{case}/config.yaml",
     "checkpoint_path": f"train/model/{case}/latest.pt",
-    "normalization_data_path": "train/data/deeponet_terzaghi_train.h5",
+    "normalization_data_path": "data/train.h5",
+    # Boundary condition for u used by the reference solver (ground truth generation).
+    # Options:
+    #   - "drained": Dirichlet u=0 on all six faces (fully drained)
+    #   - "drained_xy_top_nodrain_bottom": Drained on x/y faces and top z face,
+    #     no-drain (Neumann du/dz=0) on bottom z face
+    "bc": "drained",
     
     # Grid parameters (should match training data generation)
     "nx": 51,
@@ -36,29 +44,71 @@ EVAL_CONFIG = {
     "z_range": (0.0, 1.0),
     
     # Time points to evaluate
-    "eval_times": [0.0, 0.2, 1.0],
-    "t_span": (0.0, 1.0),
+    "eval_times": [0.0, 0.05, 0.20],
+    "t_span": (0.0, 0.20),  
     # Spacetime MSE evaluation configuration
     "compute_spacetime_mse": True,
     "nt_mse": 51,  # number of time points between t_span[0] and t_span[1]
     
     # Test sample parameters
-    "cv_value": 0.10,
+    "cv_value": 0.5,
     "gp_params": {
         "output_scale": 1000.0,
-        "length_scales": 0.15,
+        "length_scales": 0.30,
     },
     "u0_ranges": [(10000.0, 20000.0)],
     "seed": 999,
     
     # Visualization parameters
     "y_threshold": 0.5,  # Show points where y < y_threshold
-    "output_figure": f"eval/{case}/comparison_cv_0.10.png",
+    "output_figure": f"eval/{case}/comparison.png",
     "u0_colorbar_limits": [15000.0, 20000.0],
     
     # Inference parameters
     "batch_size": 51*51*51*3,  # For batched inference
 }
+
+
+# For data_v1
+# case = "case3_vanilla_ff"
+# EVAL_CONFIG = {
+#     # Model and checkpoint paths
+#     "train_config_path": f"train/model/{case}/config.yaml",
+#     "checkpoint_path": f"train/model/{case}/latest.pt",
+#     "normalization_data_path": "train/data/deeponet_terzaghi_train.h5",
+    
+#     # Grid parameters (should match training data generation)
+#     "nx": 51,
+#     "ny": 51,
+#     "nz": 51,
+#     "x_range": (0.0, 1.0),
+#     "y_range": (0.0, 1.0),
+#     "z_range": (0.0, 1.0),
+    
+#     # Time points to evaluate
+#     "eval_times": [0.0, 0.2, 1.0],
+#     "t_span": (0.0, 1.0),
+#     # Spacetime MSE evaluation configuration
+#     "compute_spacetime_mse": True,
+#     "nt_mse": 51,  # number of time points between t_span[0] and t_span[1]
+    
+#     # Test sample parameters
+#     "cv_value": 0.10,
+#     "gp_params": {
+#         "output_scale": 1000.0,
+#         "length_scales": 0.15,
+#     },
+#     "u0_ranges": [(10000.0, 20000.0)],
+#     "seed": 999,
+    
+#     # Visualization parameters
+#     "y_threshold": 0.5,  # Show points where y < y_threshold
+#     "output_figure": f"eval/{case}/comparison_cv_0.10.png",
+#     "u0_colorbar_limits": [15000.0, 20000.0],
+    
+#     # Inference parameters
+#     "batch_size": 51*51*51*3,  # For batched inference
+# }
 
 H_DR = 0.5
 
@@ -261,7 +311,7 @@ def plot_comparison(
         if err_min == err_max:
             err_max = err_min + 1e-6
 
-        Tv = (cv_value * t) / H_DR
+        Tv = (cv_value * t) / H_DR**2
 
         base_idx = 3 * (time_idx + 1) + 1
 
@@ -402,6 +452,7 @@ def main():
     nx, ny, nz = cfg["nx"], cfg["ny"], cfg["nz"]
     x_range, y_range, z_range = cfg["x_range"], cfg["y_range"], cfg["z_range"]
     cv_value = cfg["cv_value"]
+    bc = str(cfg.get("bc", "drained"))
     
     u0_batch = random_gaussian_pwp_batch(
         n_samples=1,
@@ -435,6 +486,7 @@ def main():
         t_span=cfg["t_span"],
         u0_xy_batch=u0_batch,
         t_eval=eval_times,
+        bc=bc,
         dtype=torch.float32,
         device=device,
     )
@@ -505,6 +557,7 @@ def main():
             t_span=cfg["t_span"],
             u0_xy_batch=u0_batch,
             t_eval=eval_times_dense.tolist(),
+            bc=bc,
             dtype=torch.float32,
             device=device,
         )

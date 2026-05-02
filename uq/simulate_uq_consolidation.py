@@ -23,7 +23,9 @@ from train.models import build_model
 # ============================================================================
 # CONFIGURATION (All inputs here)
 # ============================================================================
-CASE = "case3_vanilla_ff"
+
+# data_v2
+CASE = "case3_data_v2_vanilla_ff_scaling"
 MODE = "solver"
 UQ_CONFIG = {
     # Evaluation mode: "deeponet" (fast, needs model) or "solver" (reference)
@@ -32,7 +34,7 @@ UQ_CONFIG = {
     # Model and normalization (when mode == "deeponet")
     "train_config_path": f"train/model/{CASE}/config.yaml",
     "checkpoint_path": f"train/model/{CASE}/latest.pt",
-    "normalization_data_path": "train/data/deeponet_terzaghi_val.h5",
+    "normalization_data_path": "data/train.h5",
 
     # Grid parameters (must match training/data gen)
     "nx": 51,
@@ -43,7 +45,7 @@ UQ_CONFIG = {
     "z_range": (0.0, 1.0),
 
     # Time domain
-    "t_span": (0.0, 1.0),
+    "t_span": (0.0, 0.20),
     "nt": 51,
 
     # Monte Carlo settings
@@ -55,14 +57,14 @@ UQ_CONFIG = {
     # GRF initial condition parameters
     "gp_params": {
         "output_scale": 1000.0,
-        "length_scales": 0.15,
+        "length_scales": 0.30,
     },
     "u0_ranges": [(15000.0, 15000.0)],
 
     # Uncertain Cv ~ Normal(mean, std), truncated at cv_min
-    "cv_mean": 0.05,
-    "cv_std": 0.005,
-    "cv_min": 0.02,
+    "cv_mean": 0.5,
+    "cv_std": 0.05,
+    "cv_min": 0.3,
 
     # Drainage path H_dr (Tv = Cv * t / H_dr^2)
     "H_DR": 0.5,
@@ -72,8 +74,62 @@ UQ_CONFIG = {
 
     # Outputs (NPZ only from this module; CSV/plots are in postprocess)
     "output_dir": f"uq/{CASE}/{MODE}/",
-    "uv_timeseries_npz": f"uq/{CASE}/{MODE}/Uv_timeseries.npz",
+    "uv_timeseries_npz": f"uq/{CASE}/{MODE}/Uv_timeseries_constant_cv.npz",
 }
+
+
+# data_v1
+# CASE = "case3_vanilla_ff"
+# MODE = "solver"
+# UQ_CONFIG = {
+#     # Evaluation mode: "deeponet" (fast, needs model) or "solver" (reference)
+#     "mode": MODE,
+
+#     # Model and normalization (when mode == "deeponet")
+#     "train_config_path": f"train/model/{CASE}/config.yaml",
+#     "checkpoint_path": f"train/model/{CASE}/latest.pt",
+#     "normalization_data_path": "data/train.h5",
+
+#     # Grid parameters (must match training/data gen)
+#     "nx": 51,
+#     "ny": 51,
+#     "nz": 51,
+#     "x_range": (0.0, 1.0),
+#     "y_range": (0.0, 1.0),
+#     "z_range": (0.0, 1.0),
+
+#     # Time domain
+#     "t_span": (0.0, 1.0),
+#     "nt": 51,
+
+#     # Monte Carlo settings
+#     "num_samples": 100,
+#     "seed": 2025,
+#     # Base seed for GRF u0 so samples match across modes (per-sample offset applied)
+#     "u0_seed_base": 12025,
+
+#     # GRF initial condition parameters
+#     "gp_params": {
+#         "output_scale": 1000.0,
+#         "length_scales": 0.15,
+#     },
+#     "u0_ranges": [(15000.0, 20000.0)],
+
+#     # Uncertain Cv ~ Normal(mean, std), truncated at cv_min
+#     "cv_mean": 0.05,
+#     "cv_std": 0.0,
+#     "cv_min": 0.02,
+
+#     # Drainage path H_dr (Tv = Cv * t / H_dr^2)
+#     "H_DR": 0.5,
+
+#     # Inference batch size (DeepONet)
+#     "batch_size": 51 * 51 * 51 * 3,
+
+#     # Outputs (NPZ only from this module; CSV/plots are in postprocess)
+#     "output_dir": f"uq/{CASE}/{MODE}/",
+#     "uv_timeseries_npz": f"uq/{CASE}/{MODE}/Uv_timeseries_constant_cv.npz",
+# }
 
 
 # ============================================================================

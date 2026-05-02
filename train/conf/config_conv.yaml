@@ -1,0 +1,59 @@
+# Configuration for Conv DeepONet with Fourier Features
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: false
+
+data:
+  batch_size: 2048
+  num_workers: 4
+  pin_memory: true
+  flatten_branch: false  # Conv branch requires 2D input (51x51)
+  dtype: float32
+  train:
+    data_path: data/train.h5
+    seed: 42
+    shuffle: false
+    drop_last: false
+  val:
+    data_path: data/val.h5
+    seed: 43
+    shuffle: false
+    drop_last: false
+
+model:
+  use_conv_branch: true       # Use Conv2d branch
+  use_fourier_features: true  # Use Fourier features in trunk
+  branch:
+    input_dim: 2601  # Ignored for conv branch
+    hidden_dim: 256  # Ignored for conv branch
+    output_dim: 128  # Output dimension from conv branch
+    num_blocks: 3    # Ignored for conv branch
+  trunk:
+    input_dim: 256  # Will be overridden: ff_features * 2 (sin+cos)
+    hidden_dim: 256
+    output_dim: 128
+    num_blocks: 3  # Number of residual blocks
+  ff_features: 128  # Fourier feature dimension
+  ff_sigma: 1.0     # Fourier feature scale
+  dtype: float32
+  device: ${training.device}
+
+training:
+  epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  checkpoint_dir: train/checkpoint/conv
+  log_dir: train/runs/conv
+  resume: false
+  print_every: 2
+  checkpoint_interval: 1
+  grad_clip_norm: null
+  device: cuda
+  log_every_steps: 10
+  verbose: false
+

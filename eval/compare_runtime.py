@@ -31,7 +31,7 @@ from eval.evaluate_full_field import (  # noqa: E402  (import after path setup)
 BENCHMARK_CONFIG: Dict[str, object] = {
     "train_config_path": "train/model/cose3_vanilla_ff/config.yaml",
     "checkpoint_path": "train/model/cose3_vanilla_ff/latest.pt",
-    "normalization_data_path": "train/data/deeponet_terzaghi_val.h5",
+    "normalization_data_path": "data/val.h5",
     "nx": 51,
     "ny": 51,
     "nz": 51,

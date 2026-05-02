@@ -1,9 +1,36 @@
-__pycache__
-*tmp*
-backups
-*.pt
-events.*
-*.log
-*.png
+# Python cache
+__pycache__/
+*.pyc
+
+# Hydra run outputs (not source configs under conf/)
+.hydra/
+
+# Large data & model files (download via archive — see README)
+data/
 *.h5
-debug
+*.pt
+*.npz
+
+# Analysis outputs
+*.png
+*.csv
+*.html
+*.log
+events.*
+
+# Scratch / workspace dirs
+*tmp*
+backups/
+debug/
+.cursor/
+
+# Training run output directories
+train/model/
+rom/rom/
+eval/case*/
+eval_rom/
+solver/test/
+
+# UQ simulation outputs
+uq/*/deeponet/
+uq/*/solver/

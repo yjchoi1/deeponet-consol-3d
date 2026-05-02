@@ -19,9 +19,9 @@ from solver.solver_batch import solve_terzaghi_3d_fdm_batch
 
 
 CONFIG: Dict[str, object] = {
-    "dataset_path": Path("train/data/deeponet_terzaghi_train.h5"),
+    "dataset_path": Path("data/train.h5"),
     "sample_index": 0,
-    "time_index": 40,
+    "time_index": 20,
     "volume_opacity": 0.12,
     "volume_surface_count": 18,
     "marker_size": 6,
@@ -62,6 +62,7 @@ def compute_full_field(
 ) -> np.ndarray:
     """Re-simulate the 3D consolidation field for the stored initial surface."""
     torch_dtype = getattr(torch, config.get("torch_dtype", "float32"))
+    bc = str(config.get("bc", "drained"))
 
     time_samples = np.asarray(config["time_samples"], dtype=np.float32)
     t_span = (float(time_samples[0]), float(time_samples[-1]))
@@ -80,6 +81,7 @@ def compute_full_field(
         t_span=t_span,
         u0_xy_batch=u0_tensor,
         t_eval=time_samples,
+        bc=bc,
         dtype=torch_dtype,
     )
 

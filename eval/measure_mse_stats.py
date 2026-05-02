@@ -23,13 +23,15 @@ from train.models import build_model
 # =====================================================================================
 # Configuration (edit as needed)
 # =====================================================================================
-CASE = "case3_vanilla_ff"
+
+# data_v2
+CASE = "case3_data_v2_vanilla_ff_scaling"
 
 CONFIG = {
     # Model and checkpoint paths
     "train_config_path": f"train/model/{CASE}/config.yaml",
     "checkpoint_path": f"train/model/{CASE}/latest.pt",
-    "normalization_data_path": "train/data/deeponet_terzaghi_train.h5",
+    "normalization_data_path": "data/train.h5",
 
     # Device control: None -> use training config (if CUDA available), else CPU
     "device": None,
@@ -42,6 +44,12 @@ CONFIG = {
     # Test (inference) evaluation configuration
     "test": {
         "num_samples": 5,            # number of random input functions to test
+        # Boundary condition for u used by the reference solver (ground truth generation).
+        # Options:
+        #   - "drained": Dirichlet u=0 on all six faces (fully drained)
+        #   - "drained_xy_top_nodrain_bottom": Drained on x/y faces and top z face,
+        #     no-drain (Neumann du/dz=0) on bottom z face
+        "bc": "drained",
         "nx": 51,
         "ny": 51,
         "nz": 51,
@@ -49,7 +57,7 @@ CONFIG = {
         "y_range": (0.0, 1.0),
         "z_range": (0.0, 1.0),
         "eval_times": [0.0, 0.2, 1.0],
-        "t_span": (0.0, 1.0),
+        "t_span": (0.0, 0.20),
         # Spacetime MSE configuration (dense temporal grid)
         "compute_spacetime_mse": True,
         "nt_mse": 51,  # number of time points between t_span[0] and t_span[1]
@@ -60,7 +68,7 @@ CONFIG = {
         "cv_value": 0.10,
         "gp_params": {
             "output_scale": 1000.0,
-            "length_scales": 0.15,
+            "length_scales": 0.30,
         },
         "u0_ranges": [(10000.0, 20000.0)],
         "seed": 999,
@@ -68,6 +76,53 @@ CONFIG = {
         "batch_size": 51 * 51 * 51 * 3,
     },
 }
+
+# data_v1
+# CASE = "case3_vanilla_ff"
+
+# CONFIG = {
+#     # Model and checkpoint paths
+#     "train_config_path": f"train/model/{CASE}/config.yaml",
+#     "checkpoint_path": f"train/model/{CASE}/latest.pt",
+#     "normalization_data_path": "train/data/deeponet_terzaghi_train.h5",
+
+#     # Device control: None -> use training config (if CUDA available), else CPU
+#     "device": None,
+
+#     # Train/Val sampling configuration
+#     "trainval": {
+#         "num_steps": 100,  # number of batches to evaluate for each of train and val
+#     },
+
+#     # Test (inference) evaluation configuration
+#     "test": {
+#         "num_samples": 5,            # number of random input functions to test
+#         "nx": 51,
+#         "ny": 51,
+#         "nz": 51,
+#         "x_range": (0.0, 1.0),
+#         "y_range": (0.0, 1.0),
+#         "z_range": (0.0, 1.0),
+#         "eval_times": [0.0, 0.2, 1.0],
+#         "t_span": (0.0, 1.0),
+#         # Spacetime MSE configuration (dense temporal grid)
+#         "compute_spacetime_mse": True,
+#         "nt_mse": 51,  # number of time points between t_span[0] and t_span[1]
+#         # Cv sampling: prefer "cv_ranges" (list of (min,max)) or "cv_range" (single (min,max)).
+#         # If neither is set or empty, falls back to constant "cv_value".
+#         # "cv_ranges": [0.03, 0.1],
+#         # "cv_range": (0.03, 0.1),
+#         "cv_value": 0.10,
+#         "gp_params": {
+#             "output_scale": 1000.0,
+#             "length_scales": 0.15,
+#         },
+#         "u0_ranges": [(10000.0, 20000.0)],
+#         "seed": 999,
+#         # batched inference: number of points per forward pass
+#         "batch_size": 51 * 51 * 51 * 3,
+#     },
+# }
 
 
 # =====================================================================================
@@ -285,6 +340,7 @@ def main():
     # Test-time evaluation (multiple random input functions)
     print("\n[4] Evaluating test MSE over random input functions (inference)...")
     test_cfg = cfg["test"]
+    bc = str(test_cfg.get("bc", "drained"))
     nx, ny, nz = int(test_cfg["nx"]), int(test_cfg["ny"]), int(test_cfg["nz"])
     x_range = tuple(test_cfg["x_range"])  # type: ignore[assignment]
     y_range = tuple(test_cfg["y_range"])  # type: ignore[assignment]
@@ -338,6 +394,7 @@ def main():
             t_span=t_span,
             u0_xy_batch=u0_batch,
             t_eval=eval_times,
+            bc=bc,
             dtype=torch.float32,
             device=device,
         )
@@ -384,6 +441,7 @@ def main():
                 t_span=t_span,
                 u0_xy_batch=u0_batch,
                 t_eval=eval_times_dense.tolist(),
+                bc=bc,
                 dtype=torch.float32,
                 device=device,
             )

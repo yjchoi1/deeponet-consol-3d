@@ -1,0 +1,39 @@
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: false
+
+data:
+  fields_path: data/rom_fields.h5
+  basis_path: data/basis.npz
+  dtype: float32
+  batch_size: 1024
+  num_workers: 4
+  pin_memory: true
+  train_ratio: 0.8
+  shuffle_train: true
+  seed: 42
+
+model:
+  # u0_dim is auto-computed from the data (nx * ny)
+  n_modes: 50
+  hidden_dim: 256
+  num_layers: 4
+
+training:
+  epochs: 20000
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  device: cuda
+  checkpoint_dir: rom/rom/checkpoint
+  log_dir: rom/rom/runs
+  resume: false
+  print_every: 50
+  checkpoint_interval: 200
+  grad_clip_norm: null
+  log_every_steps: 50
+  verbose: false
